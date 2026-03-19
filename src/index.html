@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JOR — Just Open & Run</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <div id="launcher">
+      <!-- Search Bar -->
+      <div class="search-bar">
+        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input
+          type="text"
+          id="search-input"
+          placeholder="Search apps, files, commands..."
+          spellcheck="false"
+          autocomplete="off"
+          autofocus
+        >
+      </div>
+
+      <!-- Results -->
+      <ul id="results"></ul>
+
+      <!-- Footer -->
+      <div class="footer">
+        <span><kbd>↑</kbd><kbd>↓</kbd> navigate &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>⎋</kbd> close &nbsp; <kbd>⇥</kbd> autocomplete</span>
+        <span>JOR</span>
+      </div>
+    </div>
+
+    <script src="./main.js" defer></script>
+  </body>
+</html>
