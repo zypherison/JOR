@@ -64,10 +64,19 @@ jobs:
           $pkg.version = $ver
           $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
           
-          # Update Cargo.toml version line
-          $cargo = Get-Content src-tauri/Cargo.toml -Raw
-          $cargo = $cargo -replace 'version = "[\d\.]+"', "version = `"$ver`""
-          Set-Content src-tauri/Cargo.toml $cargo
+          # Update ONLY the [package] version in Cargo.toml (not dependency versions)
+          $lines = Get-Content src-tauri/Cargo.toml
+          $inPackage = $false
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^\[package\]') { $inPackage = $true }
+            elseif ($lines[$i] -match '^\[') { $inPackage = $false }
+            
+            if ($inPackage -and $lines[$i] -match '^version\s*=') {
+              $lines[$i] = "version = `"$ver`""
+              break
+            }
+          }
+          $lines | Set-Content src-tauri/Cargo.toml
 
       # ── Setup toolchains ─────────────────────────────────
       - name: Setup Node.js
