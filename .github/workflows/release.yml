@@ -2,42 +2,100 @@ name: "Release JOR"
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
 
 jobs:
-  release:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [windows-latest]
+  create-release:
+    runs-on: windows-latest
 
-    runs-on: ${{ matrix.platform }}
     steps:
+      # ── Checkout ─────────────────────────────────────────
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history needed for tag detection
 
-      - name: setup node
+      # ── Determine next version ───────────────────────────
+      # Reads the latest vX.Y.Z tag, bumps patch, creates new tag
+      - name: Calculate next version
+        id: version
+        shell: pwsh
+        run: |
+          # Get latest tag matching vX.Y.Z pattern
+          $tags = git tag --list "v*" --sort=-version:refname 2>$null
+          if ($tags) {
+            $latest = ($tags | Select-Object -First 1).Trim()
+            Write-Host "Latest tag: $latest"
+            
+            # Parse major.minor.patch
+            $parts = $latest.TrimStart("v").Split(".")
+            $major = [int]$parts[0]
+            $minor = [int]$parts[1]
+            $patch = [int]$parts[2]
+            
+            # Bump patch
+            $patch++
+            $next = "v$major.$minor.$patch"
+          } else {
+            $next = "v1.0.0"
+          }
+          
+          Write-Host "Next version: $next"
+          echo "VERSION=$next" >> $env:GITHUB_OUTPUT
+          echo "VERSION_NUM=$($next.TrimStart('v'))" >> $env:GITHUB_OUTPUT
+
+      # ── Sync version into project files ──────────────────
+      - name: Update version in project files
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.VERSION_NUM }}"
+          
+          # Update tauri.conf.json
+          $tauri = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $tauri.version = $ver
+          $tauri | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+          
+          # Update package.json
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $pkg.version = $ver
+          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
+          
+          # Update Cargo.toml version line
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          $cargo = $cargo -replace 'version = "[\d\.]+"', "version = `"$ver`""
+          Set-Content src-tauri/Cargo.toml $cargo
+
+      # ── Setup toolchains ─────────────────────────────────
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: install Rust stable
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Install dependencies
         run: npm ci
 
-      - name: build app and create installers
+      # ── Build with Tauri ─────────────────────────────────
+      - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: app-v__VERSION__ # the action automatically replaces \_\_VERSION\_\_ with the app version
-          releaseName: "JOR v__VERSION__"
-          releaseBody: "See the assets to download this version and install."
-          releaseDraft: true
+          tagName: ${{ steps.version.outputs.VERSION }}
+          releaseName: "JOR ${{ steps.version.outputs.VERSION }}"
+          releaseBody: |
+            ## JOR ${{ steps.version.outputs.VERSION }}
+            
+            ### 📦 Installation
+            Download `JOR_${{ steps.version.outputs.VERSION_NUM }}_x64-setup.exe` or `JOR_${{ steps.version.outputs.VERSION_NUM }}_x64_en-US.msi` from the assets below.
+            
+            ### ⚡ What's New
+            See [commit history](https://github.com/${{ github.repository }}/commits/${{ steps.version.outputs.VERSION }}) for changes.
+          releaseDraft: false
           prerelease: false
