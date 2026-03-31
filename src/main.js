@@ -19,6 +19,8 @@ const results = document.getElementById("results");
 let entries       = [];   // Current result set
 let selectedIndex = 0;    // Active selection index
 let isExploring   = false; // True when in directory browse mode
+let searchTimer   = null;
+let requestSeq    = 0;
 
 // ── SVG Icon Library (Feather-style, inline) ────────────────
 
@@ -85,7 +87,16 @@ function webSearchEntry(query, isExplicit) {
 // ── Core: Perform Search ────────────────────────────────────
 // Called on every input event (real-time as-you-type).
 
-async function performSearch() {
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer);
+  const delay = input.value.trim().length <= 1 ? 0 : 55;
+  const reqId = ++requestSeq;
+  searchTimer = setTimeout(() => {
+    performSearch(reqId);
+  }, delay);
+}
+
+async function performSearch(reqId = ++requestSeq) {
   const query = input.value;
   selectedIndex = 0;
 
@@ -96,7 +107,9 @@ async function performSearch() {
     isExploring = /^[a-zA-Z]:[\\\/]/.test(query) || query.startsWith("~/") || query.startsWith("/");
 
     if (isExploring) {
-      entries = await invoke("list_directory", { path: query });
+      const directoryEntries = await invoke("list_directory", { path: query });
+      if (reqId !== requestSeq) return;
+      entries = directoryEntries;
       renderResults();
       return;
     }
@@ -113,6 +126,7 @@ async function performSearch() {
 
     // Backend fuzzy search
     const backend = await invoke("search", { query });
+    if (reqId !== requestSeq) return;
 
     entries = [...extra, ...backend];
 
@@ -195,7 +209,7 @@ async function launchEntry(entry) {
       let p = entry.path;
       if (!p.endsWith("\\") && !p.endsWith("/")) p += "\\";
       input.value = p;
-      performSearch();
+      scheduleSearch();
       return;
     } else {
       // Everything else → dispatch to Rust
@@ -225,11 +239,11 @@ function handleTab() {
     if (!p.endsWith("\\") && !p.endsWith("/")) p += "\\";
     input.value = p;
     isExploring = true;
-    performSearch();
+    scheduleSearch();
   } else {
     // Anything else: autocomplete the name
     input.value = top.name;
-    performSearch();
+    scheduleSearch();
   }
 }
 
@@ -243,13 +257,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (focused) {
       input.value = "";
       isExploring = false;
-      performSearch();
+      performSearch(++requestSeq);
       setTimeout(() => input.focus(), 10);
     }
   });
 
   // Real-time search on every keystroke
-  input.addEventListener("input", performSearch);
+  input.addEventListener("input", scheduleSearch);
 
   // Keyboard navigation
   window.addEventListener("keydown", async (e) => {
@@ -288,7 +302,7 @@ window.addEventListener("DOMContentLoaded", async () => {
           // First Escape clears the input
           input.value = "";
           isExploring = false;
-          performSearch();
+          performSearch(++requestSeq);
         } else {
           // Second Escape hides the window
           invoke("hide_window");
@@ -303,7 +317,7 @@ window.addEventListener("DOMContentLoaded", async () => {
           parts.pop();
           if (parts.length > 0) {
             input.value = parts.join("\\") + "\\";
-            performSearch();
+            scheduleSearch();
           }
         }
         break;
@@ -312,5 +326,5 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initial state
   input.focus();
-  performSearch();
+  performSearch(++requestSeq);
 });

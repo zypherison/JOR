@@ -4,9 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JOR — Just Open & Run</title>
+    <link rel="icon" type="image/png" href="../logo.png">
     <link rel="stylesheet" href="./style.css">
   </head>
   <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="ambient-grid"></div>
+
     <div id="launcher">
       <!-- Search Bar -->
       <div class="search-bar">
@@ -14,6 +19,7 @@
           <circle cx="11" cy="11" r="8"></circle>
           <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
         </svg>
+        <span class="search-pill">Instant</span>
         <input
           type="text"
           id="search-input"
@@ -30,7 +36,7 @@
       <!-- Footer -->
       <div class="footer">
         <span><kbd>↑</kbd><kbd>↓</kbd> navigate &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>⎋</kbd> close &nbsp; <kbd>⇥</kbd> autocomplete</span>
-        <span>JOR</span>
+        <span>JOR / Native Rust Index</span>
       </div>
     </div>
 

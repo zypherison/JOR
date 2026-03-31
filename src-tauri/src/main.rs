@@ -21,12 +21,17 @@ mod config;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, Duration};
+use std::collections::HashSet;
 use indexer::Indexer;
-use models::{Entry, EntryKind, Workflow};
+use models::{Config, Entry, EntryKind, Workflow};
 use search::SearchEngine;
 use tauri::{AppHandle, Manager, Wry, State, Window};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
+use walkdir::WalkDir;
+
+const MAX_BROWSE_DEPTH: usize = 8;
+const MAX_BROWSE_RESULTS: usize = 1200;
 
 // ── Application State ───────────────────────────────────────
 
@@ -101,6 +106,7 @@ async fn hide_window(window: Window) {
 #[tauri::command]
 async fn list_directory(path: String) -> Result<Vec<Entry>, String> {
     let mut entries = Vec::new();
+    let mut seen_paths = HashSet::new();
 
     // Resolve ~ to home directory
     let expanded = if path.starts_with("~/") || path.starts_with("~\\") {
@@ -113,11 +119,12 @@ async fn list_directory(path: String) -> Result<Vec<Entry>, String> {
     if dir.is_dir() {
         if let Ok(read_dir) = std::fs::read_dir(dir) {
             for item in read_dir.filter_map(|r| r.ok()) {
-                let ft = item.file_type().unwrap();
+                let Ok(ft) = item.file_type() else { continue; };
                 let name = item.file_name().to_string_lossy().to_string();
                 // Skip hidden items
                 if name.starts_with('.') || name.starts_with('$') { continue; }
                 let path_str = item.path().to_string_lossy().to_string();
+                if !seen_paths.insert(path_str.clone()) { continue; }
                 let kind = if ft.is_dir() { EntryKind::Folder } else { EntryKind::File };
 
                 entries.push(Entry {
@@ -129,6 +136,47 @@ async fn list_directory(path: String) -> Result<Vec<Entry>, String> {
                     score: 0,
                 });
             }
+        }
+
+        // Include nested descendants to make deep folder content discoverable.
+        // Direct children are still listed first after sorting.
+        for item in WalkDir::new(dir)
+            .min_depth(2)
+            .max_depth(MAX_BROWSE_DEPTH)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entries.len() >= MAX_BROWSE_RESULTS {
+                break;
+            }
+
+            let path = item.path();
+            let Some(name_os) = path.file_name() else { continue; };
+            let name = name_os.to_string_lossy().to_string();
+            if name.starts_with('.') || name.starts_with('$') { continue; }
+
+            let path_str = path.to_string_lossy().to_string();
+            if !seen_paths.insert(path_str.clone()) { continue; }
+
+            let kind = if path.is_dir() { EntryKind::Folder } else { EntryKind::File };
+            let subtitle = path
+                .strip_prefix(dir)
+                .ok()
+                .and_then(|p| p.parent())
+                .map(|p| {
+                    let s = p.to_string_lossy();
+                    if s.is_empty() { expanded.clone() } else { s.to_string() }
+                })
+                .unwrap_or_else(|| expanded.clone());
+
+            entries.push(Entry {
+                name: name.clone(),
+                name_lower: name.to_lowercase(),
+                path: path_str,
+                subtitle,
+                kind,
+                score: 0,
+            });
         }
     }
 
@@ -144,6 +192,41 @@ async fn list_directory(path: String) -> Result<Vec<Entry>, String> {
     Ok(entries)
 }
 
+fn build_workflow_entries(cfg: &Config) -> Vec<Entry> {
+    let mut workflow_entries = Vec::new();
+    for wf in &cfg.workflows {
+        if let Some(keyword) = &wf.keyword {
+            if let Ok(payload) = serde_json::to_string(wf) {
+                workflow_entries.push(Entry {
+                    name: wf.name.clone(),
+                    name_lower: keyword.to_lowercase(),
+                    path: payload,
+                    subtitle: "Workflow".to_string(),
+                    kind: EntryKind::Workflow,
+                    score: 120,
+                });
+            }
+        }
+    }
+    workflow_entries
+}
+
+fn sync_workflow_entries(app: &AppHandle) {
+    let cfg = config::load_or_create_config();
+    let entries_arc = {
+        let state: State<AppState> = app.state();
+        state.entries.clone()
+    };
+
+    match entries_arc.lock() {
+        Ok(mut entries) => {
+            entries.retain(|e| e.kind != EntryKind::Workflow);
+            entries.extend(build_workflow_entries(&cfg));
+        }
+        Err(_) => {}
+    };
+}
+
 // ── Window Management ───────────────────────────────────────
 
 /// Toggle the launcher window visibility.
@@ -153,6 +236,9 @@ fn toggle_window(app: &AppHandle) {
         if window.is_visible().unwrap_or(false) {
             window.hide().ok();
         } else {
+            // Pull latest workflow config before each show so deletions/edits apply immediately.
+            sync_workflow_entries(app);
+
             let state: State<AppState> = app.state();
             if let Ok(mut t) = state.last_show_time.lock() {
                 *t = Instant::now();
@@ -172,21 +258,8 @@ fn main() {
     // Build fresh index on every launch to stay current
     let mut initial_entries = Indexer::index_all(&loaded_config.extra_paths);
 
-    // Inject user-defined workflows as searchable entries
-    for wf in &loaded_config.workflows {
-        if let Some(keyword) = &wf.keyword {
-            if let Ok(payload) = serde_json::to_string(wf) {
-                initial_entries.push(Entry {
-                    name: wf.name.clone(),
-                    name_lower: keyword.to_lowercase(),
-                    path: payload,
-                    subtitle: "Workflow".to_string(),
-                    kind: EntryKind::Workflow,
-                    score: 120,
-                });
-            }
-        }
-    }
+    // Inject user-defined workflows as searchable entries.
+    initial_entries.extend(build_workflow_entries(&loaded_config));
 
     let engine = Arc::new(SearchEngine::new());
 
@@ -254,7 +327,7 @@ fn main() {
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::TrayIconBuilder;
 
-            let quit = MenuItem::with_id(app, "quit", "Quit JOR", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Toggle JOR", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 

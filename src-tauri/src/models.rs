@@ -60,18 +60,18 @@ impl Default for Config {
         Self {
             workflows: vec![
                 Workflow {
-                    name: "Empty Recycle Bin".into(),
-                    keyword: Some("empty trash".into()),
-                    hotkey: Some("CommandOrControl+Shift+E".into()),
-                    command: "powershell".into(),
-                    args: vec!["-NoProfile".into(), "-Command".into(), "Clear-RecycleBin -Force".into()],
-                },
-                Workflow {
-                    name: "Open Terminal Here".into(),
+                    name: "Terminal".into(),
                     keyword: Some("terminal".into()),
-                    hotkey: None,
+                    hotkey: Some("alt+t".into()),
                     command: "wt".into(),
                     args: vec![],
+                },
+                Workflow {
+                    name: "Open Brave Incognito".into(),
+                    keyword: Some("brave-incognito".into()),
+                    hotkey: None,
+                    command: "brave".into(), // or "brave-browser" / full path depending on your system
+                    args: vec!["--incognito".into()],
                 },
             ],
             extra_paths: vec![],

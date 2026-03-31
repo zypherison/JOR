@@ -19,34 +19,17 @@ jobs:
         with:
           fetch-depth: 0 # Full history needed for tag detection
 
-      # ── Determine next version ───────────────────────────
-      # Reads the latest vX.Y.Z tag, bumps patch, creates new tag
-      - name: Calculate next version
+      # ── Set fixed version ───────────────────────────────
+      # Always use v1.0.0 (no bumping) so the same winget link stays valid
+      - name: Set fixed version
         id: version
         shell: pwsh
         run: |
-          # Get latest tag matching vX.Y.Z pattern
-          $tags = git tag --list "v*" --sort=-version:refname 2>$null
-          if ($tags) {
-            $latest = ($tags | Select-Object -First 1).Trim()
-            Write-Host "Latest tag: $latest"
-            
-            # Parse major.minor.patch
-            $parts = $latest.TrimStart("v").Split(".")
-            $major = [int]$parts[0]
-            $minor = [int]$parts[1]
-            $patch = [int]$parts[2]
-            
-            # Bump patch
-            $patch++
-            $next = "v$major.$minor.$patch"
-          } else {
-            $next = "v1.0.0"
-          }
+          $next = "v1.0.0"
           
-          Write-Host "Next version: $next"
+          Write-Host "Using fixed version: $next"
           echo "VERSION=$next" >> $env:GITHUB_OUTPUT
-          echo "VERSION_NUM=$($next.TrimStart('v'))" >> $env:GITHUB_OUTPUT
+          echo "VERSION_NUM=1.0.0" >> $env:GITHUB_OUTPUT
 
       # ── Sync version into project files ──────────────────
       - name: Update version in project files
@@ -108,3 +91,27 @@ jobs:
             See [commit history](https://github.com/${{ github.repository }}/commits/${{ steps.version.outputs.VERSION }}) for changes.
           releaseDraft: false
           prerelease: false
+
+      # ── Update Winget manifest with installer hash ───────
+      - name: Update Winget manifest hash
+        shell: pwsh
+        run: |
+          $msiPath = "src-tauri/target/release/bundle/msi/JOR_${{ steps.version.outputs.VERSION_NUM }}_x64_en-US.msi"
+          if (Test-Path $msiPath) {
+            $hash = (Get-FileHash $msiPath -Algorithm SHA256).Hash
+            Write-Host "MSI Hash: $hash"
+            
+            $manifestPath = "winget/manifests/j/Jor/jor/${{ steps.version.outputs.VERSION_NUM }}/Jor.jor.installer.yaml"
+            if (Test-Path $manifestPath) {
+              $content = Get-Content $manifestPath -Raw
+              $content = $content -replace 'InstallerSha256: [A-F0-9]{64}', "InstallerSha256: $hash"
+              Set-Content $manifestPath $content -Encoding UTF8 -NoNewline
+              
+              # Commit and push the manifest update
+              git config user.email "github-actions@github.com"
+              git config user.name "GitHub Actions"
+              git add $manifestPath
+              git commit -m "chore: update winget manifest hash for v${{ steps.version.outputs.VERSION_NUM }}"
+              git push
+            }
+          }
