@@ -19,17 +19,33 @@ jobs:
         with:
           fetch-depth: 0 # Full history needed for tag detection
 
-      # ── Set fixed version ───────────────────────────────
-      # Always use v1.0.0 (no bumping) so the same winget link stays valid
-      - name: Set fixed version
+      # ── Determine next version ───────────────────────────
+      - name: Calculate next version
         id: version
         shell: pwsh
         run: |
-          $next = "v1.0.0"
+          # Get latest tag matching vX.Y.Z pattern
+          $tags = git tag --list "v*" --sort=-version:refname 2>$null
+          if ($tags) {
+            $latest = ($tags | Select-Object -First 1).Trim()
+            Write-Host "Latest tag: $latest"
+            
+            # Parse major.minor.patch
+            $parts = $latest.TrimStart("v").Split(".")
+            $major = [int]$parts[0]
+            $minor = [int]$parts[1]
+            $patch = [int]$parts[2]
+            
+            # Bump patch
+            $patch++
+            $next = "v$major.$minor.$patch"
+          } else {
+            $next = "v1.0.0"
+          }
           
-          Write-Host "Using fixed version: $next"
+          Write-Host "Next version: $next"
           echo "VERSION=$next" >> $env:GITHUB_OUTPUT
-          echo "VERSION_NUM=1.0.0" >> $env:GITHUB_OUTPUT
+          echo "VERSION_NUM=$($next.TrimStart('v'))" >> $env:GITHUB_OUTPUT
 
       # ── Sync version into project files ──────────────────
       - name: Update version in project files
@@ -47,13 +63,12 @@ jobs:
           $pkg.version = $ver
           $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
           
-          # Update ONLY the [package] version in Cargo.toml (not dependency versions)
+          # Update Cargo.toml version
           $lines = Get-Content src-tauri/Cargo.toml
           $inPackage = $false
           for ($i = 0; $i -lt $lines.Count; $i++) {
             if ($lines[$i] -match '^\[package\]') { $inPackage = $true }
             elseif ($lines[$i] -match '^\[') { $inPackage = $false }
-            
             if ($inPackage -and $lines[$i] -match '^version\s*=') {
               $lines[$i] = "version = `"$ver`""
               break
@@ -86,32 +101,55 @@ jobs:
             
             ### 📦 Installation
             Download `JOR_${{ steps.version.outputs.VERSION_NUM }}_x64-setup.exe` or `JOR_${{ steps.version.outputs.VERSION_NUM }}_x64_en-US.msi` from the assets below.
-            
-            ### ⚡ What's New
-            See [commit history](https://github.com/${{ github.repository }}/commits/${{ steps.version.outputs.VERSION }}) for changes.
           releaseDraft: false
           prerelease: false
 
-      # ── Update Winget manifest with installer hash ───────
-      - name: Update Winget manifest hash
+      # ── Update WinGet Manifest ────────────────────────────
+      - name: Update WinGet manifest hash
         shell: pwsh
         run: |
-          $msiPath = "src-tauri/target/release/bundle/msi/JOR_${{ steps.version.outputs.VERSION_NUM }}_x64_en-US.msi"
-          if (Test-Path $msiPath) {
-            $hash = (Get-FileHash $msiPath -Algorithm SHA256).Hash
-            Write-Host "MSI Hash: $hash"
+          $ver = "${{ steps.version.outputs.VERSION_NUM }}"
+          # In Tauri v2, the output path might vary, so we search for it
+          $msiFile = Get-ChildItem -Path "src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
+          
+          if ($msiFile) {
+            $hash = (Get-FileHash $msiFile.FullName -Algorithm SHA256).Hash
+            Write-Host "Found MSI: $($msiFile.Name) with Hash: $hash"
             
-            $manifestPath = "winget/manifests/j/Jor/jor/${{ steps.version.outputs.VERSION_NUM }}/Jor.jor.installer.yaml"
-            if (Test-Path $manifestPath) {
-              $content = Get-Content $manifestPath -Raw
-              $content = $content -replace 'InstallerSha256: [A-F0-9]{64}', "InstallerSha256: $hash"
-              Set-Content $manifestPath $content -Encoding UTF8 -NoNewline
-              
-              # Commit and push the manifest update
-              git config user.email "github-actions@github.com"
-              git config user.name "GitHub Actions"
-              git add $manifestPath
-              git commit -m "chore: update winget manifest hash for v${{ steps.version.outputs.VERSION_NUM }}"
-              git push
+            # Create new directory for this version in manifests if it doesn't exist
+            $manifestBase = "winget/manifests/j/Jor/jor/$ver"
+            if (!(Test-Path $manifestBase)) {
+              New-Item -ItemType Directory -Path $manifestBase -Force
+              # Copy templates from v1.0.0 (or whatever exists)
+              Copy-Item "winget/manifests/j/Jor/jor/1.0.0/*" $manifestBase -Force
             }
+            
+            # Update the installer manifest
+            $installerPath = "$manifestBase/Jor.jor.installer.yaml"
+            $content = Get-Content $installerPath -Raw
+            $content = $content -replace 'PackageVersion: .*', "PackageVersion: $ver"
+            $content = $content -replace 'InstallerSha256: [A-F0-9]{64}', "InstallerSha256: $hash"
+            $content = $content -replace 'InstallerUrl: .*', "https://github.com/${{ github.repository }}/releases/download/v${ver}/$($msiFile.Name)"
+            Set-Content $installerPath $content -Encoding UTF8 -NoNewline
+            
+            # Update the version manifest
+            $versionPath = "$manifestBase/Jor.jor.yaml"
+            $vContent = Get-Content $versionPath -Raw
+            $vContent = $vContent -replace 'PackageVersion: .*', "PackageVersion: $ver"
+            Set-Content $versionPath $vContent -Encoding UTF8 -NoNewline
+
+            # Update the locale manifest
+            $localePath = "$manifestBase/Jor.jor.locale.en-US.yaml"
+            $lContent = Get-Content $localePath -Raw
+            $lContent = $lContent -replace 'PackageVersion: .*', "PackageVersion: $ver"
+            Set-Content $localePath $lContent -Encoding UTF8 -NoNewline
+            
+            # Commit and push
+            git config user.email "github-actions@github.com"
+            git config user.name "GitHub Actions"
+            git add "winget/manifests/j/Jor/jor/"
+            git commit -m "chore: auto-update winget manifest for $ver"
+            git push
+          } else {
+            Write-Warning "No MSI file found in build outputs. Skipping manifest update."
           }

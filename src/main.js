@@ -1,330 +1,202 @@
-// ─────────────────────────────────────────────────────────────
-// JOR — Frontend Controller
-// Handles real-time search, keyboard navigation, Tab
-// autocomplete, math evaluation, web search, and
-// directory browsing. Zero dependencies — pure vanilla JS
-// talking to Tauri via window.__TAURI__.
-// ─────────────────────────────────────────────────────────────
-
 const { invoke } = window.__TAURI__.core;
-const { getCurrentWindow } = window.__TAURI__.window;
 
-// ── DOM References ──────────────────────────────────────────
+// ── Application State ───────────────────────────────────────
 
-const input   = document.getElementById("search-input");
-const results = document.getElementById("results");
+let entries = [];
+let selectedIndex = 0;
+let requestSeq = 0;
 
-// ── State ───────────────────────────────────────────────────
+const input = document.getElementById("search-input");
+const resultsList = document.getElementById("results-list");
+const statusIcon = document.getElementById("status-icon");
+const statusText = document.getElementById("status-text");
+const memUsage = document.getElementById("mem-usage");
+const cpuUsage = document.getElementById("cpu-usage");
+const memIndicator = document.getElementById("mem-indicator");
 
-let entries       = [];   // Current result set
-let selectedIndex = 0;    // Active selection index
-let isExploring   = false; // True when in directory browse mode
-let searchTimer   = null;
-let requestSeq    = 0;
+// ── Category Mapping ────────────────────────────────────────
 
-// ── SVG Icon Library (Feather-style, inline) ────────────────
+const CATEGORIES = [
+    { name: "Process_Queue / Applications", kinds: [0] },
+    { name: "Path_Mapper / Directories", kinds: [2] },
+    { name: "I/O_Streams / Files", kinds: [1] },
+    { name: "Kernel_Interface / System Operations", kinds: [3, 4, 5, 6, 7] }
+];
 
-const ICONS = {
-  app:      `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>`,
-  file:     `<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`,
-  folder:   `<svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
-  system:   `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`,
-  web:      `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`,
-  math:     `<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
-  workflow: `<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`,
+const BADGES = {
+    0: "APP",
+    1: "FILE",
+    2: "DIR",
+    3: "CMD",
+    4: "WEB",
+    5: "CALC",
+    6: "BOLT",
+    7: "AUTO"
 };
 
-// ── Utility: Get icon SVG by EntryKind ──────────────────────
+// ── System Stats Simulation ─────────────────────────────────
 
-function getIcon(kind) {
-  const map = { 0: "app", 1: "file", 2: "folder", 3: "system", 4: "web", 5: "math", 6: "workflow" };
-  return ICONS[map[kind]] || ICONS.file;
+function updateStats() {
+    const mem = Math.floor(Math.random() * 5 + 12);
+    const cpu = (Math.random() * 2 + 1).toFixed(1);
+    memUsage.textContent = `${mem}%`;
+    cpuUsage.textContent = `${cpu}%`;
 }
+setInterval(updateStats, 5000);
+updateStats();
 
-// ── Utility: Get human-readable type label ──────────────────
+// ── Core: Search & Rendering ────────────────────────────────
 
-function getTypeLabel(kind) {
-  const labels = { 0: "Application", 1: "File", 2: "Folder", 3: "System", 4: "Web Search", 5: "Calculator", 6: "Workflow" };
-  return labels[kind] || "Item";
-}
-
-// ── Math Evaluation (client-side, zero cost) ────────────────
-
-function evaluateMath(query) {
-  if (/^[\d\+\-\*\/\(\)\.\s\%]+$/.test(query) && /[\+\-\*\/\%]/.test(query)) {
-    try {
-      const result = new Function(`return (${query})`)();
-      if (result !== undefined && isFinite(result)) {
-        return {
-          name: `= ${result}`,
-          name_lower: "",
-          path: String(result),
-          subtitle: query,
-          kind: 5,
-          score: 1000,
-        };
-      }
-    } catch (_) {}
-  }
-  return null;
-}
-
-// ── Web Search (explicit or fallback) ───────────────────────
-
-function webSearchEntry(query, isExplicit) {
-  const clean = isExplicit ? query.substring(2).trim() : query.trim();
-  if (!clean) return null;
-  return {
-    name: `Search "${clean}" on Google`,
-    name_lower: "",
-    path: `https://google.com/search?q=${encodeURIComponent(clean)}`,
-    subtitle: "google.com",
-    kind: 4,
-    score: isExplicit ? 900 : 0,
-  };
-}
-
-// ── Core: Perform Search ────────────────────────────────────
-// Called on every input event (real-time as-you-type).
-
-function scheduleSearch() {
-  if (searchTimer) clearTimeout(searchTimer);
-  const delay = input.value.trim().length <= 1 ? 0 : 55;
-  const reqId = ++requestSeq;
-  searchTimer = setTimeout(() => {
+input.addEventListener("input", () => {
+    const reqId = ++requestSeq;
     performSearch(reqId);
-  }, delay);
+});
+
+async function performSearch(reqId) {
+    const query = input.value.trim();
+    if (!query) {
+        entries = [];
+        renderResults();
+        return;
+    }
+
+    try {
+        const extra = [];
+        if (query.toLowerCase() === "refresh" || query.toLowerCase() === "reindex") {
+            extra.push({
+                name: "Refresh Search Index",
+                name_lower: "refresh",
+                path: "REFRESH_INDEX_CMD",
+                subtitle: "REBUILD_GLOBAL_MAP",
+                kind: 3,
+                score: 1000,
+            });
+        }
+
+        const backend = await invoke("search", { query });
+        if (reqId !== requestSeq) return;
+
+        entries = [...extra, ...backend];
+        renderResults();
+    } catch (err) {
+        console.error(err);
+    }
 }
-
-async function performSearch(reqId = ++requestSeq) {
-  const query = input.value;
-  selectedIndex = 0;
-
-  try {
-    let extra = [];
-
-    // Check if user is browsing a path
-    isExploring = /^[a-zA-Z]:[\\\/]/.test(query) || query.startsWith("~/") || query.startsWith("/");
-
-    if (isExploring) {
-      const directoryEntries = await invoke("list_directory", { path: query });
-      if (reqId !== requestSeq) return;
-      entries = directoryEntries;
-      renderResults();
-      return;
-    }
-
-    // Client-side math
-    const math = evaluateMath(query);
-    if (math) extra.push(math);
-
-    // Explicit web search (prefix: "g " or "? ")
-    if (query.startsWith("g ") || query.startsWith("? ")) {
-      const ws = webSearchEntry(query, true);
-      if (ws) extra.push(ws);
-    }
-
-    // Backend fuzzy search
-    const backend = await invoke("search", { query });
-    if (reqId !== requestSeq) return;
-
-    entries = [...extra, ...backend];
-
-    // Fallback: if nothing found, offer a Google search
-    if (entries.length === 0 && query.trim().length > 0) {
-      const ws = webSearchEntry(query, false);
-      if (ws) entries.push(ws);
-    }
-
-    renderResults();
-  } catch (err) {
-    console.error("Search error:", err);
-  }
-}
-
-// ── Core: Render Results ────────────────────────────────────
 
 function renderResults() {
-  results.innerHTML = "";
+    resultsList.innerHTML = "";
+    selectedIndex = Math.min(selectedIndex, Math.max(0, entries.length - 1));
 
-  if (entries.length === 0) {
-    if (input.value.length > 0) {
-      results.innerHTML = `<li class="empty">No results found</li>`;
-    }
-    return;
-  }
-
-  entries.forEach((entry, i) => {
-    const li = document.createElement("li");
-    li.className = `item${i === selectedIndex ? " active" : ""}`;
-
-    // Badge text
-    let badge = "";
-    if (i === selectedIndex) {
-      badge = entry.kind === 5 ? "copy" : "open";
+    if (entries.length === 0 && input.value.length > 0) {
+        resultsList.innerHTML = `<div class="p-12 text-center font-mono text-xs text-outline tracking-widest uppercase">Target_Not_Found: 0x404</div>`;
+        return;
     }
 
-    // Subtitle: use entry's subtitle, or fallback to type label
-    const sub = entry.subtitle || getTypeLabel(entry.kind);
+    // Grouping logic for rendering
+    CATEGORIES.forEach(cat => {
+        const itemsInCat = entries.filter(e => cat.kinds.includes(e.kind));
+        if (itemsInCat.length === 0) return;
 
-    li.innerHTML = `
-      <div class="item-icon">${getIcon(entry.kind)}</div>
-      <div class="item-text">
-        <div class="item-name">${escapeHtml(entry.name)}</div>
-        <div class="item-sub">${escapeHtml(sub)}</div>
-      </div>
-      ${badge ? `<span class="item-badge">${badge}</span>` : ""}
-    `;
+        // Header
+        const header = document.createElement("div");
+        header.className = "px-4 py-1.5 bg-surface-container text-[10px] font-mono text-on-surface-variant uppercase tracking-[0.2em] border-b border-[#ffffff15]";
+        header.textContent = cat.name;
+        resultsList.appendChild(header);
 
-    li.addEventListener("click", () => {
-      selectedIndex = i;
-      launchEntry(entry);
+        // Items
+        itemsInCat.forEach(entry => {
+            const globalIdx = entries.indexOf(entry);
+            const isActive = globalIdx === selectedIndex;
+            
+            const item = document.createElement("div");
+            item.className = `flex items-center justify-between px-6 py-3 transition-colors group border-b border-[#ffffff05] cursor-pointer ${isActive ? 'item-active' : 'hover:bg-surface-container-low'}`;
+            
+            const badge = BADGES[entry.kind] || "ITEM";
+            const badgeClass = entry.kind === 3 ? "text-error border-error/30" : (entry.kind === 2 ? "text-tertiary-fixed border-[#ffffff15]" : "text-on-surface-variant border-[#ffffff15]");
+            
+            // Platform Redesign: Accessories support
+            const accText = (entry.accessories && entry.accessories.length > 0) 
+                ? entry.accessories.join(" · ") 
+                : (isActive ? 'EXECUTE' : 'READY');
+
+            item.innerHTML = `
+                <div class="flex items-center gap-4">
+                    <span class="font-mono text-xs font-bold px-1.5 py-0.5 border ${isActive ? 'border-black' : badgeClass}">${badge}</span>
+                    <div class="min-w-0">
+                        <div class="font-headline font-bold text-base truncate">${entry.name}</div>
+                        <div class="font-mono text-[10px] truncate max-w-[320px] item-path opacity-60">${entry.subtitle}</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3 opacity-0 group-hover:opacity-100 ${isActive ? 'opacity-100' : ''}">
+                    <span class="font-mono text-[10px] font-bold tracking-widest item-action border-b border-white/20">${accText}</span>
+                    <span class="material-symbols-outlined text-xl">subdirectory_arrow_left</span>
+                </div>
+            `;
+
+            item.onclick = () => {
+                selectedIndex = globalIdx;
+                launchEntry(entry);
+            };
+            resultsList.appendChild(item);
+
+            if (isActive) {
+                item.scrollIntoView({ block: "nearest", behavior: "smooth" });
+            }
+        });
     });
-
-    results.appendChild(li);
-  });
-
-  // Scroll active item into view
-  const active = results.querySelector(".active");
-  if (active) active.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
-// ── Utility: Escape HTML to prevent injection ───────────────
-
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-// ── Core: Launch Entry ──────────────────────────────────────
+// ── Core: Launch Logic ──────────────────────────────────────
 
 async function launchEntry(entry) {
-  try {
-    if (entry.kind === 5) {
-      // Math result → copy to clipboard
-      await navigator.clipboard.writeText(entry.path);
-    } else if (entry.kind === 2 && isExploring) {
-      // Folder in explore mode → drill down
-      let p = entry.path;
-      if (!p.endsWith("\\") && !p.endsWith("/")) p += "\\";
-      input.value = p;
-      scheduleSearch();
-      return;
-    } else {
-      // Everything else → dispatch to Rust
-      await invoke("launch", { entry });
+    if (entry.path === "REFRESH_INDEX_CMD") {
+        statusText.textContent = "INDEXING_CORE...";
+        statusIcon.textContent = "sync";
+        memIndicator.classList.add("pulse-active");
+        
+        try {
+            const [count, ms] = await invoke("refresh_index");
+            statusText.textContent = `MAP_COMPLETE: ${count}_ITEMS (${(ms/1000).toFixed(1)}s)`;
+        } catch (err) {
+            statusText.textContent = "CORE_ERROR: 0xERR";
+        }
+        
+        setTimeout(() => {
+            statusText.textContent = "SYSTEM_READY";
+            statusIcon.textContent = "check_circle";
+            memIndicator.classList.remove("pulse-active");
+        }, 5000);
+        return;
     }
 
-    // Reset after action
-    input.value = "";
-    entries = [];
-    renderResults();
-  } catch (err) {
-    console.error("Launch error:", err);
-  }
+    await invoke("launch_entry", { entry });
+    await invoke("hide_window");
 }
 
-// ── Tab Autocomplete ────────────────────────────────────────
-// If the top result is a folder or app, Tab fills the input
-// with its path for quick drilling / refinement.
+// ── Keyboard Interface ──────────────────────────────────────
 
-function handleTab() {
-  if (entries.length === 0) return;
-  const top = entries[selectedIndex];
+window.addEventListener("keydown", (e) => {
+    if (entries.length === 0) return;
 
-  if (top.kind === 2) {
-    // Folder: drill into it
-    let p = top.path;
-    if (!p.endsWith("\\") && !p.endsWith("/")) p += "\\";
-    input.value = p;
-    isExploring = true;
-    scheduleSearch();
-  } else {
-    // Anything else: autocomplete the name
-    input.value = top.name;
-    scheduleSearch();
-  }
-}
-
-// ── Event Listeners ─────────────────────────────────────────
-
-window.addEventListener("DOMContentLoaded", async () => {
-  const win = getCurrentWindow();
-
-  // On focus: reset + refresh
-  win.onFocusChanged(({ payload: focused }) => {
-    if (focused) {
-      input.value = "";
-      isExploring = false;
-      performSearch(++requestSeq);
-      setTimeout(() => input.focus(), 10);
+    if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectedIndex = (selectedIndex + 1) % entries.length;
+        renderResults();
+    } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectedIndex = (selectedIndex - 1 + entries.length) % entries.length;
+        renderResults();
+    } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (entries[selectedIndex]) {
+            launchEntry(entries[selectedIndex]);
+        }
+    } else if (e.key === "Escape") {
+        invoke("hide_window");
     }
-  });
+});
 
-  // Real-time search on every keystroke
-  input.addEventListener("input", scheduleSearch);
-
-  // Keyboard navigation
-  window.addEventListener("keydown", async (e) => {
-    switch (e.key) {
-      case "ArrowDown":
-        e.preventDefault();
-        if (entries.length > 0) {
-          selectedIndex = (selectedIndex + 1) % entries.length;
-          renderResults();
-        }
-        break;
-
-      case "ArrowUp":
-        e.preventDefault();
-        if (entries.length > 0) {
-          selectedIndex = (selectedIndex - 1 + entries.length) % entries.length;
-          renderResults();
-        }
-        break;
-
-      case "Enter":
-        e.preventDefault();
-        if (entries.length > 0 && entries[selectedIndex]) {
-          launchEntry(entries[selectedIndex]);
-        }
-        break;
-
-      case "Tab":
-        e.preventDefault();
-        handleTab();
-        break;
-
-      case "Escape":
-        e.preventDefault();
-        if (input.value.length > 0) {
-          // First Escape clears the input
-          input.value = "";
-          isExploring = false;
-          performSearch(++requestSeq);
-        } else {
-          // Second Escape hides the window
-          invoke("hide_window");
-        }
-        break;
-
-      case "Backspace":
-        // In explore mode, Backspace on empty input goes up one dir
-        if (isExploring && input.value.endsWith("\\")) {
-          e.preventDefault();
-          const parts = input.value.slice(0, -1).split("\\");
-          parts.pop();
-          if (parts.length > 0) {
-            input.value = parts.join("\\") + "\\";
-            scheduleSearch();
-          }
-        }
-        break;
-    }
-  });
-
-  // Initial state
-  input.focus();
-  performSearch(++requestSeq);
+// Auto-focus input on show (Tauri event)
+window.addEventListener("focus", () => {
+    input.focus();
 });

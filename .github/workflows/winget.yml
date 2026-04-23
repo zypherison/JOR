@@ -1,0 +1,26 @@
+name: Publish to WinGet
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get Release Metadata
+        id: metadata
+        run: |
+          echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          echo "version=${{ github.event.release.tag_name }}" | sed 's/v//' >> $GITHUB_OUTPUT
+
+      - name: WinGet Releaser
+        uses: vedantat/winget-releaser@v2
+        with:
+          identifier: JOR.JOR
+          installers-regex: '\.msi$' # Assuming Tauri outputs an MSI
+          token: ${{ secrets.WINGET_TOKEN }}
+          fork-user: zypherison

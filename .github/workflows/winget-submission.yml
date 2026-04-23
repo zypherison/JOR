@@ -1,0 +1,36 @@
+name: "Submit to WinGet Repository"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to submit (must be released on GitHub already)'
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: read
+
+jobs:
+  submit-winget:
+    runs-on: windows-latest
+    steps:
+      - name: Install WinGet-Create
+        shell: pwsh
+        run: |
+          iwr https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          
+      - name: Submit to WinGet
+        shell: pwsh
+        env:
+          WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          $ver = "${{ github.event.inputs.version }}"
+          $url = "https://github.com/${{ github.repository }}/releases/download/v${ver}/JOR_${ver}_x64_en-US.msi"
+          
+          if ($env:WINGET_GITHUB_TOKEN -eq $null) {
+            Write-Error "WINGET_TOKEN secret is missing. Please add a Personal Access Token with repo scope to your repository secrets."
+            exit 1
+          }
+          
+          ./wingetcreate.exe update Jor.jor --version $ver --urls $url --token $env:WINGET_GITHUB_TOKEN

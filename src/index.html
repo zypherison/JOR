@@ -1,45 +1,148 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JOR — Just Open & Run</title>
-    <link rel="icon" type="image/png" href="../logo.png">
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>JOR - SEARCH_SYSTEM</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&amp;family=JetBrains+Mono:wght@400;700&amp;family=Space+Grotesk:wght@700&amp;display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link rel="stylesheet" href="./style.css">
-  </head>
-  <body>
-    <div class="ambient ambient-a"></div>
-    <div class="ambient ambient-b"></div>
-    <div class="ambient-grid"></div>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary": "#59adff",
+                        "surface-container-highest": "#262626",
+                        "primary-fixed": "#00f1fd",
+                        "tertiary-fixed": "#6eb5ff",
+                        "secondary-fixed-dim": "#00d7f3",
+                        "outline": "#777575",
+                        "on-surface-variant": "#adaaaa",
+                        "secondary-container": "#006877",
+                        "surface-dim": "#0e0e0e",
+                        "inverse-on-surface": "#565554",
+                        "secondary-dim": "#00d1ec",
+                        "inverse-surface": "#fcf8f8",
+                        "on-primary-fixed": "#004145",
+                        "surface-container-high": "#201f1f",
+                        "tertiary-fixed-dim": "#4ca8fd",
+                        "outline-variant": "#494847",
+                        "error-dim": "#d7383b",
+                        "on-secondary-fixed-variant": "#005966",
+                        "secondary-fixed": "#45e4ff",
+                        "surface-tint": "#96f8ff",
+                        "surface": "#0e0e0e",
+                        "surface-container-lowest": "#000000",
+                        "surface-bright": "#2c2c2c",
+                        "on-background": "#ffffff",
+                        "on-secondary": "#004b56",
+                        "secondary": "#00e0fd",
+                        "on-secondary-fixed": "#003a43",
+                        "primary-dim": "#00e2ed",
+                        "on-primary-container": "#00565a",
+                        "primary-container": "#00f1fd",
+                        "on-surface": "#ffffff",
+                        "tertiary-container": "#41a0f5",
+                        "on-error": "#490006",
+                        "tertiary-dim": "#45a3f7",
+                        "surface-container": "#1a1919",
+                        "surface-container-low": "#131313",
+                        "background": "#0e0e0e",
+                        "on-tertiary-container": "#001f38",
+                        "on-tertiary-fixed-variant": "#003b66",
+                        "on-tertiary": "#002c4d",
+                        "on-tertiary-fixed": "#00192f",
+                        "primary": "#96f8ff",
+                        "inverse-primary": "#006a6f",
+                        "error": "#ff716c",
+                        "on-error-container": "#ffa8a3",
+                        "on-secondary-container": "#eafbff",
+                        "error-container": "#9f0519",
+                        "on-primary": "#005f64",
+                        "on-primary-fixed-variant": "#006065",
+                        "primary-fixed-dim": "#00e2ed",
+                        "surface-variant": "#262626"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Inter"],
+                        "mono": ["JetBrains Mono"]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="flex items-center justify-center font-body text-on-surface overflow-hidden w-screen h-screen">
+    <!-- Main Widget Container -->
+    <div id="launcher" class="w-full max-w-[760px] bg-surface-dim border border-[#ffffff15] shadow-2xl relative overflow-hidden flex flex-col">
+        
+        <!-- Header / Search Section -->
+        <section class="p-6 border-b border-[#ffffff15] bg-surface-container-low">
+            <div class="flex items-center gap-4">
+                <span class="material-symbols-outlined text-primary text-xl">terminal</span>
+                <div class="flex-1 flex items-center gap-1">
+                    <span class="font-mono text-xl text-primary opacity-50">$</span>
+                    <input 
+                        id="search-input" 
+                        autofocus 
+                        class="w-full bg-transparent border-none focus:ring-0 font-mono text-xl text-on-surface placeholder:text-surface-container-highest p-0" 
+                        placeholder="Execute command..." 
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                    />
+                    <div class="w-2.5 h-6 bg-primary blink"></div>
+                </div>
+            </div>
+        </section>
 
-    <div id="launcher">
-      <!-- Search Bar -->
-      <div class="search-bar">
-        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <span class="search-pill">Instant</span>
-        <input
-          type="text"
-          id="search-input"
-          placeholder="Search apps, files, commands..."
-          spellcheck="false"
-          autocomplete="off"
-          autofocus
-        >
-      </div>
+        <!-- Results Area -->
+        <main id="results-container" class="flex-1 overflow-y-auto custom-scrollbar max-h-[500px]">
+            <!-- Dynamic Content Injected by JS -->
+            <div id="results-list" class="flex flex-col"></div>
+        </main>
 
-      <!-- Results -->
-      <ul id="results"></ul>
+        <!-- Footer Bar -->
+        <footer class="h-8 bg-surface-container-lowest border-t border-[#ffffff15] flex items-center justify-between px-4">
+            <div class="flex items-center gap-4 font-mono text-[9px] text-on-surface-variant uppercase tracking-widest">
+                <div class="flex items-center gap-1.5">
+                    <span id="mem-indicator" class="w-1.5 h-1.5 bg-primary rounded-full"></span>
+                    MEM: <span class="text-on-surface" id="mem-usage">14%</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span id="cpu-indicator" class="w-1.5 h-1.5 bg-tertiary rounded-full"></span>
+                    CPU: <span class="text-on-surface" id="cpu-usage">2.1%</span>
+                </div>
+            </div>
+            <div class="font-mono text-[9px] text-primary font-bold tracking-widest flex items-center gap-2">
+                <span id="status-icon" class="material-symbols-outlined text-[10px]">check_circle</span>
+                <span id="status-text">SYSTEM_READY</span>
+            </div>
+        </footer>
+    </div>
 
-      <!-- Footer -->
-      <div class="footer">
-        <span><kbd>↑</kbd><kbd>↓</kbd> navigate &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>⎋</kbd> close &nbsp; <kbd>⇥</kbd> autocomplete</span>
-        <span>JOR / Native Rust Index</span>
-      </div>
+    <!-- Background Decoration -->
+    <div class="fixed top-8 left-8 border border-[#ffffff08] p-4 pointer-events-none hidden lg:block">
+        <div class="font-mono text-[10px] text-on-surface-variant/30 leading-tight">
+            KERNEL_VER: 2.0.4-JOR<br/>
+            SESSION_ID: JOR_0x98A1
+        </div>
+    </div>
+    <div class="fixed bottom-8 right-8 pointer-events-none opacity-5 hidden lg:block">
+        <div class="text-[120px] font-headline font-bold leading-none text-white select-none">JOR</div>
     </div>
 
     <script src="./main.js" defer></script>
-  </body>
+</body>
 </html>

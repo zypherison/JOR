@@ -16,6 +16,7 @@ pub enum EntryKind {
     Web      = 4,
     Math     = 5,
     Workflow = 6,
+    Skill    = 7,
 }
 
 /// A single searchable entry in the launcher index.
@@ -34,6 +35,10 @@ pub struct Entry {
     pub kind: EntryKind,
     /// Static score bias (system actions get a boost).
     pub score: u32,
+    /// Metadata tags shown on the right side (e.g. "1.2MB", "Active").
+    pub accessories: Option<Vec<String>>,
+    /// Hidden keywords used only for matching, not display.
+    pub keywords: Option<Vec<String>>,
 }
 
 /// A user-defined workflow (Alfred Powerpack equivalent).
@@ -63,8 +68,8 @@ impl Default for Config {
                     name: "Terminal".into(),
                     keyword: Some("terminal".into()),
                     hotkey: Some("alt+t".into()),
-                    command: "wt".into(),
-                    args: vec![],
+                    command: "cmd".into(),
+                    args: vec!["/c".into(), "start wt || start powershell".into()],
                 },
                 Workflow {
                     name: "Open Brave Incognito".into(),

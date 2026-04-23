@@ -34,6 +34,21 @@ impl SearchEngine {
         }
     }
 
+    pub fn save_usage(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let counts = self.usage_counts.lock().unwrap();
+        let encoded = serde_json::to_string(&*counts).unwrap();
+        std::fs::write(path, encoded)
+    }
+
+    pub fn load_usage(&self, path: &std::path::Path) {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(map) = serde_json::from_str::<HashMap<String, u32>>(&content) {
+                let mut counts = self.usage_counts.lock().unwrap();
+                *counts = map;
+            }
+        }
+    }
+
     /// Perform a fuzzy search with smart ranking.
     /// Returns up to 20 results, ordered by composite score:
     ///   fuzzy_score + exact_match_bonus + usage_bonus + static_score
@@ -57,19 +72,33 @@ impl SearchEngine {
         let mut results: Vec<(i64, Entry)> = entries
             .iter()
             .filter_map(|entry| {
-                // Primary: match against entry name
+                // Match against name
                 let name_score = self.matcher.fuzzy_match(&entry.name_lower, &query_lower);
 
-                // Secondary: match against full path (half weight)
+                // Match against keywords (if any)
+                let mut kw_score = None;
+                if let Some(kws) = &entry.keywords {
+                    for kw in kws {
+                        if let Some(s) = self.matcher.fuzzy_match(&kw.to_lowercase(), &query_lower) {
+                            kw_score = Some(kw_score.unwrap_or(0).max(s));
+                        }
+                    }
+                }
+
+                // Match against full path (half weight)
                 let path_lower = entry.path.to_lowercase();
                 let path_score = self.matcher.fuzzy_match(&path_lower, &query_lower)
                     .map(|s| s / 2);
 
-                let best = match (name_score, path_score) {
-                    (Some(a), Some(b)) => Some(a.max(b)),
-                    (Some(a), None) => Some(a),
-                    (None, Some(b)) => Some(b),
-                    (None, None) => None,
+                let best = match (name_score, kw_score, path_score) {
+                    (Some(a), Some(b), Some(c)) => Some(a.max(b).max(c)),
+                    (Some(a), Some(b), None) => Some(a.max(b)),
+                    (Some(a), None, Some(c)) => Some(a.max(c)),
+                    (None, Some(b), Some(c)) => Some(b.max(c)),
+                    (Some(a), None, None) => Some(a),
+                    (None, Some(b), None) => Some(b),
+                    (None, None, Some(c)) => Some(c),
+                    (None, None, None) => None,
                 };
 
                 best.map(|score| {
@@ -83,7 +112,17 @@ impl SearchEngine {
                     let usage = counts.get(&entry.path).copied().unwrap_or(0) as i64;
                     let usage_bonus = usage * 10; // Each launch adds +10 to ranking
 
-                    let total = score + exact_bonus + prefix_bonus + usage_bonus + (entry.score as i64);
+                    // Type priority bonus (Favor Apps > System > Workflows > Folders > Files)
+                    let kind_bonus: i64 = match entry.kind {
+                        crate::models::EntryKind::App => 200,
+                        crate::models::EntryKind::System => 180,
+                        crate::models::EntryKind::Workflow => 150,
+                        crate::models::EntryKind::Folder => 50,
+                        crate::models::EntryKind::File => 0,
+                        _ => 0,
+                    };
+
+                    let total = score + exact_bonus + prefix_bonus + usage_bonus + kind_bonus + (entry.score as i64);
                     (total, entry.clone())
                 })
             })

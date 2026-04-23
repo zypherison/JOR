@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --jor-bg: #0e0e0e;
+  --jor-cyan: #96f8ff;
+  --jor-surface: #1a1a1a;
+  --jor-text: #ffffff;
+  --jor-text-dim: rgba(255, 255, 255, 0.6);
+}
+
+@layer base {
+  body {
+    @apply bg-transparent text-white font-sans overflow-hidden select-none;
+  }
+}
+
+@layer components {
+  .brutalist-card {
+    @apply bg-[#0e0e0e] border border-[#ffffff15] shadow-2xl;
+    background-image: radial-gradient(#111 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  .brutalist-input {
+    @apply bg-transparent border-none focus:ring-0 text-xl font-bold tracking-tight text-white;
+  }
+
+  .brutalist-badge {
+    @apply font-mono text-[10px] font-bold px-1.5 py-0.5 border border-[#ffffff15] text-[#ffffff60] uppercase;
+  }
+
+  .item-active {
+    @apply bg-[#96f8ff] text-black border-transparent;
+  }
+
+  .item-active .brutalist-badge {
+    @apply border-black text-black;
+  }
+
+  .blink-cursor {
+    @apply w-2.5 h-6 bg-[#96f8ff] inline-block align-middle ml-1;
+    animation: blink 1s step-end infinite;
+  }
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #000000;
+}
+::-webkit-scrollbar-thumb {
+  background: #333333;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #444444;
+}

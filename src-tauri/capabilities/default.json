@@ -5,6 +5,11 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default"
+    "core:app:default",
+    "core:window:default",
+    "opener:default",
+    "shell:default",
+    "autostart:default",
+    "global-shortcut:default"
   ]
 }
