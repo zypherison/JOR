@@ -8,6 +8,7 @@
 
 const { invoke } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
+const { listen } = window.__TAURI__.event;
 
 // ── DOM References ──────────────────────────────────────────
 
@@ -19,6 +20,7 @@ const results = document.getElementById("results");
 let entries       = [];   // Current result set
 let selectedIndex = 0;    // Active selection index
 let isExploring   = false; // True when in directory browse mode
+let currentMode   = "standard"; // standard, clipboard
 let searchTimer   = null;
 let requestSeq    = 0;
 
@@ -32,19 +34,20 @@ const ICONS = {
   web:      `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`,
   math:     `<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
   workflow: `<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`,
+  clipboard: `<svg viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>`,
 };
 
 // ── Utility: Get icon SVG by EntryKind ──────────────────────
 
 function getIcon(kind) {
-  const map = { 0: "app", 1: "file", 2: "folder", 3: "system", 4: "web", 5: "math", 6: "workflow" };
+  const map = { 0: "app", 1: "file", 2: "folder", 3: "system", 4: "web", 5: "math", 6: "workflow", 7: "clipboard" };
   return ICONS[map[kind]] || ICONS.file;
 }
 
 // ── Utility: Get human-readable type label ──────────────────
 
 function getTypeLabel(kind) {
-  const labels = { 0: "Application", 1: "File", 2: "Folder", 3: "System", 4: "Web Search", 5: "Calculator", 6: "Workflow" };
+  const labels = { 0: "Application", 1: "File", 2: "Folder", 3: "System", 4: "Web Search", 5: "Calculator", 6: "Workflow", 7: "Clipboard" };
   return labels[kind] || "Item";
 }
 
@@ -114,23 +117,23 @@ async function performSearch(reqId = ++requestSeq) {
       return;
     }
 
-    // Client-side math
+    // Standard-only features: Math and Explicit Web Search
+    // Math and Explicit Web Search
     const math = evaluateMath(query);
     if (math) extra.push(math);
 
-    // Explicit web search (prefix: "g " or "? ")
     if (query.startsWith("g ") || query.startsWith("? ")) {
       const ws = webSearchEntry(query, true);
       if (ws) extra.push(ws);
     }
 
     // Backend fuzzy search
-    const backend = await invoke("search", { query });
+    const backend = await invoke("search", { query, mode: currentMode });
     if (reqId !== requestSeq) return;
 
     entries = [...extra, ...backend];
-
-    // Fallback: if nothing found, offer a Google search
+    
+    // Fallback: offer Google search
     if (entries.length === 0 && query.trim().length > 0) {
       const ws = webSearchEntry(query, false);
       if (ws) entries.push(ws);
@@ -251,6 +254,18 @@ function handleTab() {
 
 window.addEventListener("DOMContentLoaded", async () => {
   const win = getCurrentWindow();
+
+  // Listen for mode switches from Rust
+  await listen("switch-mode", (event) => {
+    currentMode = event.payload;
+    if (currentMode === "clipboard") {
+      input.placeholder = "Search Clipboard...";
+    } else {
+      input.placeholder = "Search apps, files, and more...";
+    }
+    input.value = "";
+    performSearch(++requestSeq);
+  });
 
   // On focus: reset + refresh
   win.onFocusChanged(({ payload: focused }) => {

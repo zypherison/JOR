@@ -16,6 +16,7 @@ pub enum EntryKind {
     Web      = 4,
     Math     = 5,
     Workflow = 6,
+    Plugin   = 7,
 }
 
 /// A single searchable entry in the launcher index.
@@ -34,6 +35,8 @@ pub struct Entry {
     pub kind: EntryKind,
     /// Static score bias (system actions get a boost).
     pub score: u32,
+    #[serde(default)]
+    pub search_score: i64,
 }
 
 /// A user-defined workflow (Alfred Powerpack equivalent).

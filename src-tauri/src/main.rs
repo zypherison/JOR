@@ -18,6 +18,7 @@ mod models;
 mod indexer;
 mod search;
 mod config;
+mod plugins;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, Duration};
@@ -25,7 +26,7 @@ use std::collections::HashSet;
 use indexer::Indexer;
 use models::{Config, Entry, EntryKind, Workflow};
 use search::SearchEngine;
-use tauri::{AppHandle, Manager, Wry, State, Window};
+use tauri::{AppHandle, Manager, Wry, State, Window, Emitter};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 use walkdir::WalkDir;
@@ -43,15 +44,57 @@ pub struct AppState {
     /// Timestamp of the last window show — used to debounce
     /// the focus-loss auto-hide (prevents flicker on summon).
     pub last_show_time: Arc<Mutex<Instant>>,
+    /// List of active plugins.
+    pub plugins: Vec<Box<dyn plugins::Plugin>>,
 }
 
 // ── Tauri Commands ──────────────────────────────────────────
 
-/// Search the index. Called on every keystroke from the frontend.
 #[tauri::command]
-async fn search(query: String, state: State<'_, AppState>) -> Result<Vec<Entry>, String> {
-    let entries = state.entries.lock().unwrap();
-    Ok(state.engine.search(&query, &entries))
+async fn clear_clipboard_history(state: State<'_, AppState>) -> Result<(), String> {
+    for plugin in &state.plugins {
+        if plugin.id() == "clipboard" {
+            // We need to execute a special action to clear
+            return plugin.execute("clear_all").await;
+        }
+    }
+    Err("Clipboard plugin not found".into())
+}
+
+#[tauri::command]
+async fn search(query: String, mode: String, state: State<'_, AppState>) -> Result<Vec<Entry>, String> {
+    if mode == "clipboard" {
+        // STRICT: Only clipboard results
+        let mut results = Vec::new();
+        for plugin in &state.plugins {
+            if plugin.id() == "clipboard" {
+                results.extend(plugin.search(&query, &mode).await);
+            }
+        }
+        return Ok(results);
+    }
+
+    // Standard mode: Search engine (Apps/Files) + Non-clipboard plugins
+    let mut results = {
+        let entries = state.entries.lock().unwrap();
+        state.engine.search(&query, &entries)
+    };
+
+    // Query relevant plugins (excluding clipboard for standard mode)
+    for plugin in &state.plugins {
+        if plugin.id() != "clipboard" {
+            let plugin_results = plugin.search(&query, &mode).await;
+            results.extend(plugin_results);
+        }
+    }
+
+    // Sort again to ensure plugin results are prioritized by score
+    results.sort_by(|a, b| b.search_score.cmp(&a.search_score));
+    
+    // Final limit to 50 results for performance
+    results.truncate(50);
+
+    Ok(results)
 }
 
 /// Launch an entry. Handles apps, files, folders, workflows,
@@ -85,6 +128,18 @@ async fn launch(entry: Entry, app: AppHandle) -> Result<(), String> {
                 .spawn()
                 .map_err(|e| e.to_string())?;
             Ok(())
+        }
+        EntryKind::Plugin => {
+            // Handle plugin actions. The 'path' field is used as the action_id.
+            // We need to find which plugin this belongs to.
+            if let Some((plugin_id, action_id)) = entry.path.split_once(':') {
+                for plugin in &state.plugins {
+                    if plugin.id() == plugin_id {
+                        return plugin.execute(action_id).await;
+                    }
+                }
+            }
+            Err("Plugin not found".into())
         }
         _ => {
             // Apps, files, folders — open with system default handler
@@ -134,12 +189,12 @@ async fn list_directory(path: String) -> Result<Vec<Entry>, String> {
                     subtitle: expanded.clone(),
                     kind,
                     score: 0,
+                    search_score: 0,
                 });
             }
         }
 
         // Include nested descendants to make deep folder content discoverable.
-        // Direct children are still listed first after sorting.
         for item in WalkDir::new(dir)
             .min_depth(2)
             .max_depth(MAX_BROWSE_DEPTH)
@@ -176,6 +231,7 @@ async fn list_directory(path: String) -> Result<Vec<Entry>, String> {
                 subtitle,
                 kind,
                 score: 0,
+                search_score: 0,
             });
         }
     }
@@ -204,6 +260,7 @@ fn build_workflow_entries(cfg: &Config) -> Vec<Entry> {
                     subtitle: "Workflow".to_string(),
                     kind: EntryKind::Workflow,
                     score: 120,
+                    search_score: 0,
                 });
             }
         }
@@ -230,19 +287,33 @@ fn sync_workflow_entries(app: &AppHandle) {
 // ── Window Management ───────────────────────────────────────
 
 /// Toggle the launcher window visibility.
-/// On show: records timestamp for debouncing.
 fn toggle_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
             window.hide().ok();
         } else {
-            // Pull latest workflow config before each show so deletions/edits apply immediately.
             sync_workflow_entries(app);
 
             let state: State<AppState> = app.state();
             if let Ok(mut t) = state.last_show_time.lock() {
                 *t = Instant::now();
             }
+            
+            // Standard mode
+            window.emit("switch-mode", "standard").ok();
+            
+            window.show().ok();
+            window.set_focus().ok();
+        }
+    }
+}
+
+/// Open the window specifically for clipboard search.
+fn toggle_clipboard_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("clipboard") {
+        if window.is_visible().unwrap_or(false) {
+            window.hide().ok();
+        } else {
             window.show().ok();
             window.set_focus().ok();
         }
@@ -252,13 +323,8 @@ fn toggle_window(app: &AppHandle) {
 // ── Entry Point ─────────────────────────────────────────────
 
 fn main() {
-    // Load user configuration
     let loaded_config = config::load_or_create_config();
-
-    // Build fresh index on every launch to stay current
     let mut initial_entries = Indexer::index_all(&loaded_config.extra_paths);
-
-    // Inject user-defined workflows as searchable entries.
     initial_entries.extend(build_workflow_entries(&loaded_config));
 
     let engine = Arc::new(SearchEngine::new());
@@ -267,6 +333,11 @@ fn main() {
         entries: Arc::new(Mutex::new(initial_entries)),
         engine: engine.clone(),
         last_show_time: Arc::new(Mutex::new(Instant::now())),
+        plugins: vec![
+            Box::new(plugins::clipboard::ClipboardPlugin::new()),
+            Box::new(plugins::converter::ConverterPlugin),
+            Box::new(plugins::window_manager::WindowManagerPlugin),
+        ],
     };
 
     tauri::Builder::default()
@@ -280,6 +351,13 @@ fn main() {
         .setup(move |app| {
             app.manage(state);
 
+            // Initialize all plugins
+            let app_handle = app.handle();
+            let state: State<AppState> = app_handle.state();
+            for plugin in &state.plugins {
+                plugin.init(app_handle);
+            }
+
             // ── Focus-loss auto-hide (Alt-V pattern) ────────
             if let Some(main_window) = app.get_webview_window("main") {
                 let wc = main_window.clone();
@@ -290,7 +368,7 @@ fn main() {
                     if let tauri::WindowEvent::Focused(focused) = event {
                         if !*focused {
                             if let Ok(t) = last_show.lock() {
-                                if t.elapsed() > Duration::from_millis(500) {
+                                if t.elapsed().as_millis() > 100 {
                                     wc.hide().ok();
                                 }
                             }
@@ -299,11 +377,32 @@ fn main() {
                 });
             }
 
-            // ── Global hotkey: Alt+Space ────────────────────
+            // Apply same focus-loss auto-hide to clipboard window
+            if let Some(clip_window) = app.get_webview_window("clipboard") {
+                let wc = clip_window.clone();
+                clip_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(focused) = event {
+                        if !*focused {
+                            wc.hide().ok();
+                        }
+                    }
+                });
+            }
+
+            // ── Global hotkey: Alt+Space (General) ──────────
             if let Ok(shortcut) = "Alt+Space".parse::<Shortcut>() {
                 app.global_shortcut().on_shortcut(shortcut, |app, _, event| {
                     if event.state() == ShortcutState::Pressed {
                         toggle_window(app);
+                    }
+                }).ok();
+            }
+
+            // ── Global hotkey: Alt+V (Clipboard) ────────────
+            if let Ok(shortcut) = "Alt+V".parse::<Shortcut>() {
+                app.global_shortcut().on_shortcut(shortcut, |app, _, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        toggle_clipboard_window(app);
                     }
                 }).ok();
             }

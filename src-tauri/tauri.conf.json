@@ -22,6 +22,21 @@
         "center": true,
         "skipTaskbar": true,
         "shadow": false
+      },
+      {
+        "title": "JOR Clipboard",
+        "width": 600,
+        "height": 450,
+        "label": "clipboard",
+        "url": "clipboard.html",
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "center": true,
+        "skipTaskbar": true,
+        "shadow": false
       }
     ],
     "security": {

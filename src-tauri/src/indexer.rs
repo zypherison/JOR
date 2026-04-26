@@ -93,6 +93,7 @@ impl Indexer {
                 subtitle: subtitle.to_string(),
                 kind: EntryKind::System,
                 score: 80,
+                search_score: 0,
             });
         }
 
@@ -122,6 +123,7 @@ impl Indexer {
                 subtitle: parent,
                 kind: EntryKind::Folder,
                 score: 0,
+                search_score: 0,
             });
         }
 
@@ -161,6 +163,7 @@ impl Indexer {
             subtitle: parent,
             kind,
             score: 0,
+            search_score: 0,
         })
     }
 

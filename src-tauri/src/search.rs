@@ -41,14 +41,17 @@ impl SearchEngine {
         if query.is_empty() {
             // When empty, show most-used items first, then recent
             let counts = self.usage_counts.lock().unwrap();
-            let mut scored: Vec<(u32, &Entry)> = entries.iter()
+            let mut scored: Vec<(u32, Entry)> = entries.iter()
                 .map(|e| {
                     let usage = counts.get(&e.path).copied().unwrap_or(0);
-                    (usage + e.score, e)
+                    let score = usage + e.score;
+                    let mut entry = e.clone();
+                    entry.search_score = score as i64;
+                    (score, entry)
                 })
                 .collect();
             scored.sort_by(|a, b| b.0.cmp(&a.0));
-            return scored.into_iter().take(20).map(|(_, e)| e.clone()).collect();
+            return scored.into_iter().take(20).map(|(_, e)| e).collect();
         }
 
         let query_lower = query.to_lowercase();
@@ -84,7 +87,9 @@ impl SearchEngine {
                     let usage_bonus = usage * 10; // Each launch adds +10 to ranking
 
                     let total = score + exact_bonus + prefix_bonus + usage_bonus + (entry.score as i64);
-                    (total, entry.clone())
+                    let mut e = entry.clone();
+                    e.search_score = total;
+                    (total, e)
                 })
             })
             .collect();
