@@ -17,6 +17,7 @@ pub enum EntryKind {
     Math     = 5,
     Workflow = 6,
     Plugin   = 7,
+    Clipboard = 8,
 }
 
 /// A single searchable entry in the launcher index.

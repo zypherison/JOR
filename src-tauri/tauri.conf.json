@@ -24,19 +24,39 @@
         "shadow": false
       },
       {
-        "title": "JOR Clipboard",
-        "width": 600,
-        "height": 450,
         "label": "clipboard",
         "url": "clipboard.html",
-        "decorations": false,
-        "transparent": true,
-        "resizable": false,
-        "alwaysOnTop": true,
         "visible": false,
+        "transparent": true,
         "center": true,
+        "width": 600,
+        "height": 800,
         "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "resizable": false,
         "shadow": false
+      },
+      {
+        "label": "settings",
+        "url": "settings.html",
+        "visible": false,
+        "title": "JOR — Dashboard",
+        "width": 1000,
+        "height": 700,
+        "center": true,
+        "resizable": true
+      },
+      {
+        "label": "tos",
+        "url": "tos.html",
+        "visible": false,
+        "title": "JOR — Legal Agreement",
+        "width": 600,
+        "height": 700,
+        "center": true,
+        "resizable": false,
+        "alwaysOnTop": true
       }
     ],
     "security": {

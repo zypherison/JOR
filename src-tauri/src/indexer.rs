@@ -10,6 +10,7 @@ use walkdir::WalkDir;
 use crate::models::{Entry, EntryKind};
 use std::io::{Read, Write};
 use std::collections::HashSet;
+use tauri::Manager;
 
 pub struct Indexer;
 
@@ -24,11 +25,41 @@ const EXT_CODE:    &[&str] = &["rs", "js", "ts", "py", "go", "java", "c", "cpp",
 
 impl Indexer {
     /// Build the complete index from all configured directories.
-    /// `extra_paths` comes from the user config file.
-    pub fn index_all(extra_paths: &[String]) -> Vec<Entry> {
+    /// Uses a cache file for instant startup if available.
+    pub fn index_all(app: &tauri::AppHandle, extra_paths: &[String]) -> Vec<Entry> {
+        let cache_path = app.path().app_cache_dir().unwrap_or_default().join("index.bin");
+        
+        // Try to load from cache first for speed
+        if let Ok(cached) = Self::load_index(&cache_path) {
+            return cached;
+        }
+
+        let entries = Self::perform_full_index(extra_paths);
+        let _ = Self::save_index(&entries, &cache_path);
+        entries
+    }
+
+    pub fn refresh_index(app: &tauri::AppHandle, extra_paths: Vec<String>) {
+        let ah = app.clone();
+        let cache_path = app.path().app_cache_dir().unwrap_or_default().join("index.bin");
+        
+        tauri::async_runtime::spawn(async move {
+            let fresh = Self::perform_full_index(&extra_paths);
+            let _ = Self::save_index(&fresh, &cache_path);
+            
+            // Update the running state
+            if let Some(state) = ah.try_state::<crate::AppState>() {
+                if let Ok(mut entries) = state.entries.lock() {
+                    *entries = fresh;
+                    println!("Index refreshed backgroundly with {} items", entries.len());
+                }
+            }
+        });
+    }
+
+    fn perform_full_index(extra_paths: &[String]) -> Vec<Entry> {
         let mut entries = Vec::new();
         let mut visited: HashSet<String> = HashSet::new();
-        // (path, deep_crawl)
         let mut paths_to_index: Vec<(PathBuf, bool)> = Vec::new();
 
         // ── Start Menu shortcuts (deep crawl) ───────────────
@@ -48,19 +79,19 @@ impl Indexer {
         if let Some(p) = dirs::video_dir()    { paths_to_index.push((p, false)); }
         if let Some(p) = dirs::audio_dir()    { paths_to_index.push((p, false)); }
         if let Some(p) = dirs::home_dir()     { paths_to_index.push((p, false)); }
+        
+        // ── Program Files (shallow) ────────────────────────
+        paths_to_index.push((PathBuf::from("C:\\Program Files"), false));
+        paths_to_index.push((PathBuf::from("C:\\Program Files (x86)"), false));
 
-        // ── Extra user-configured paths ─────────────────────
         for extra in extra_paths {
             let p = PathBuf::from(extra);
-            if p.exists() {
-                paths_to_index.push((p, false));
-            }
+            if p.exists() { paths_to_index.push((p, false)); }
         }
 
-        // ── Walk and process ────────────────────────────────
         for (root, deep) in &paths_to_index {
             if !root.exists() { continue; }
-            let depth = if *deep { 5 } else { 2 };
+            let depth = if *deep { 8 } else { 2 };
 
             for entry in WalkDir::new(root)
                 .max_depth(depth)
@@ -78,7 +109,6 @@ impl Indexer {
             }
         }
 
-        // ── Baked-in System Actions ─────────────────────────
         let system_actions = vec![
             ("Sleep",             "Sleep your PC",    "rundll32.exe powrprof.dll,SetSuspendState 0,1,0"),
             ("Shut Down",         "Power off",        "shutdown /s /t 0"),

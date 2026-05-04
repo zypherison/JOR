@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JOR — Dashboard</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --bg-top: rgba(20, 20, 26, 0.95);
+      --bg-mid: rgba(15, 15, 20, 0.98);
+      --bg-bottom: rgba(10, 10, 14, 1);
+      --accent: #8b5cf6;
+      --accent-hover: #a78bfa;
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --text-main: #ffffff;
+      --text-muted: #9aa0a6;
+      --surface: rgba(255, 255, 255, 0.04);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 100vw;
+      height: 100vh;
+      background: linear-gradient(160deg, var(--bg-top), var(--bg-mid), var(--bg-bottom));
+      color: var(--text-main);
+      font-family: "Inter", sans-serif;
+      display: flex;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 260px;
+      border-right: 1px solid var(--panel-border);
+      display: flex;
+      flex-direction: column;
+      padding: 40px 24px;
+      background: rgba(0,0,0,0.2);
+      backdrop-filter: blur(20px);
+    }
+
+    .logo {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 50px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo span { color: var(--accent); }
+
+    .nav-item {
+      padding: 14px 18px;
+      border-radius: 12px;
+      cursor: pointer;
+      margin-bottom: 8px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 15px;
+      font-weight: 500;
+    }
+
+    .nav-item:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-main); }
+    .nav-item.active { background: rgba(255, 255, 255, 0.1); color: var(--text-main); font-weight: 600; box-shadow: inset 0 1px 1px rgba(255,255,255,0.05); }
+
+    /* Main Content */
+    .main {
+      flex: 1;
+      padding: 60px 100px;
+      overflow-y: auto;
+      background: radial-gradient(circle at top right, rgba(139, 92, 246, 0.05), transparent 50%);
+    }
+
+    h1 { font-size: 36px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 40px; }
+
+    .section { margin-bottom: 50px; }
+    .section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: var(--accent); margin-bottom: 24px; opacity: 0.9; }
+
+    /* Controls */
+    .control-group {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--panel-border);
+      border-radius: 20px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .control-label { display: flex; flex-direction: column; gap: 6px; }
+    .control-label span { font-weight: 600; font-size: 15px; }
+    .control-label small { color: var(--text-muted); font-size: 13px; opacity: 0.8; }
+
+    input[type="text"], input[type="color"] {
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: var(--text-main);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input[type="text"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent), 0 0 10px rgba(139,92,246,0.2);
+    }
+
+    input[type="color"] { width: 56px; height: 38px; padding: 2px; cursor: pointer; border-radius: 8px; }
+
+    .btn {
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      padding: 14px 28px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+    }
+    .btn:hover { background: var(--accent-hover); box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4); transform: translateY(-1px); }
+    .btn:active { transform: translateY(1px); box-shadow: 0 2px 10px rgba(139, 92, 246, 0.3); }
+
+    /* Hotkeys List */
+    .hotkey-list { display: flex; flex-direction: column; gap: 12px; }
+    .hotkey-item {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      background: rgba(255,255,255,0.02);
+      padding: 10px;
+      border-radius: 12px;
+      border: 1px solid var(--panel-border);
+    }
+    .hotkey-item input { flex: 1; border-color: transparent; background: rgba(0,0,0,0.1); }
+    .remove-btn { color: #f87171; cursor: pointer; font-size: 12px; font-weight: 600; padding: 0 10px; transition: color 0.2s; }
+    .remove-btn:hover { color: #ef4444; }
+
+    /* Footer Save */
+    .actions {
+      position: fixed;
+      bottom: 40px;
+      right: 80px;
+      display: flex;
+      gap: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <div class="logo">JOR <span>•</span> Dashboard</div>
+    <div class="nav-item active" onclick="showTab('appearance')">Appearance</div>
+    <div class="nav-item" onclick="showTab('hotkeys')">Hotkeys</div>
+    <div class="nav-item" onclick="showTab('features')">Features</div>
+    <div class="nav-item" onclick="showTab('about')">About</div>
+  </div>
+
+  <div class="main">
+    <div id="tab-appearance">
+      <h1>Appearance</h1>
+      <div class="section">
+        <div class="section-title">Color Palette</div>
+        <div class="control-group">
+          <div class="control-row">
+            <div class="control-label"><span>Accent Color</span><small>Highlight and focus color</small></div>
+            <input type="color" id="theme-accent">
+          </div>
+          <div class="control-row">
+            <div class="control-label"><span>Background (Top)</span></div>
+            <input type="color" id="theme-bg-top">
+          </div>
+          <div class="control-row">
+            <div class="control-label"><span>Background (Bottom)</span></div>
+            <input type="color" id="theme-bg-bottom">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-hotkeys" style="display:none">
+      <h1>Hotkeys</h1>
+      <div class="section">
+        <div class="section-title">Core System Shortcuts</div>
+        <div class="control-group">
+          <div class="control-row">
+            <div class="control-label"><span>Main Launcher</span><small>Press key combination to record</small></div>
+            <input type="text" id="hk-main" class="theme-input hotkey-recorder" placeholder="Alt+Space" readonly>
+          </div>
+          <div class="control-row">
+            <div class="control-label"><span>Clipboard Manager</span><small>Access your history instantly</small></div>
+            <input type="text" id="hk-clip" class="theme-input hotkey-recorder" placeholder="Alt+V" readonly>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Custom App Launchers</div>
+        <div class="control-group" id="custom-hotkeys-container" style="gap: 12px; background: transparent; border: none; padding: 0;">
+          <!-- Dynamically filled -->
+        </div>
+        <button class="btn btn-secondary" style="margin-top: 15px; width: 100%; border-style: dashed; opacity: 0.7;" onclick="addCustomHotkey()">+ Register New Application Shortcut</button>
+      </div>
+    </div>
+
+    <div id="tab-about" style="display:none">
+      <h1>About JOR</h1>
+      <div class="section">
+        <div class="section-title">Application Info</div>
+        <div class="control-group">
+          <div class="control-row">
+            <div class="control-label"><span>Version</span><small>Current production release</small></div>
+            <div style="font-family: 'JetBrains Mono'; font-size: 14px; color: var(--accent);">v2.0.4-premium</div>
+          </div>
+          <div class="control-row">
+            <div class="control-label"><span>Architecture</span><small>Core engine platform</small></div>
+            <div style="font-size: 14px;">Tauri v2 + Rust Core</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Developer & Credits</div>
+        <div class="control-group">
+          <p style="font-size: 14px; line-height: 1.6; color: var(--text-muted);">
+            JOR is a "Just Open & Run" productivity platform. The core engine is proprietary technology, 
+            while the plugin architecture remains open for community innovation.
+          </p>
+          <div style="margin-top: 15px; display: flex; gap: 10px;">
+            <div style="font-size: 13px; color: var(--accent); cursor: pointer; text-decoration: underline;" onclick="window.__TAURI__.shell.open('https://jor.worthy.com/license')">View Proprietary License</div>
+            <div style="font-size: 13px; color: var(--text-muted);">&copy; 2026 JOR Productivity Systems.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-features" style="display:none">
+      <h1>Features & Plugins</h1>
+      <div class="section">
+        <div class="section-title">Enabled Modules</div>
+        <div class="control-group" id="plugin-list">
+          <!-- Toggles will go here -->
+        </div>
+      </div>
+    </div>
+
+    <div class="actions" style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+      <button class="btn" style="background: rgba(255, 50, 50, 0.15); border: 1px solid rgba(255, 50, 50, 0.3); color: #ff8888;" onclick="repairSettings()">🛠 Repair Settings</button>
+      <button class="btn" onclick="saveSettings()">Save Changes</button>
+    </div>
+  </div>
+
+  <!-- App Picker Modal -->
+  <div id="app-picker" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(15px); z-index:100; align-items:center; justify-content:center;">
+    <div style="background:var(--bg-mid); border:1px solid var(--panel-border); border-radius:24px; width:540px; max-height:650px; display:flex; flex-direction:column; padding:24px; box-shadow: 0 20px 60px rgba(0,0,0,0.6);">
+      <h2 style="margin-bottom:20px; font-weight:600; letter-spacing:-0.5px;">Select Application</h2>
+      <input type="text" id="app-picker-search" placeholder="Search apps..." style="width:100%; margin-bottom:15px; padding:14px; background:rgba(0,0,0,0.2); border:1px solid var(--panel-border); border-radius:12px; color:white; font-family:'Inter', sans-serif; font-size:14px; outline:none;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--panel-border)'" oninput="filterApps()">
+      <div id="app-picker-list" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding-right:5px;">
+        <!-- Apps go here -->
+      </div>
+      <button class="btn" style="margin-top:20px; background:rgba(255,255,255,0.05); color:var(--text-main); border:1px solid var(--panel-border); box-shadow:none;" onclick="closeAppPicker()">Cancel</button>
+    </div>
+  </div>
+
+  <script type="module">
+    const { invoke } = window.__TAURI__.core;
+
+    let settings = {};
+
+    async function load() {
+      settings = await invoke("get_settings");
+      
+      // Map to UI
+      document.getElementById("theme-accent").value = settings.theme.accent;
+      document.getElementById("theme-bg-top").value = settings.theme.bg_top;
+      document.getElementById("theme-bg-bottom").value = settings.theme.bg_bottom;
+      
+      document.getElementById("hk-main").value = settings.main_hotkey;
+      document.getElementById("hk-clip").value = settings.clip_hotkey;
+
+      renderCustomHotkeys();
+    }
+
+    window.showTab = (tab) => {
+      ['appearance', 'hotkeys', 'features', 'about'].forEach(t => {
+        const el = document.getElementById('tab-' + t);
+        if (el) el.style.display = (t === tab) ? 'block' : 'none';
+      });
+      document.querySelectorAll('.nav-item').forEach(nav => {
+        nav.classList.toggle('active', nav.innerText.toLowerCase() === tab);
+      });
+    };
+
+    function renderCustomHotkeys() {
+      const container = document.getElementById("custom-hotkeys-container");
+      container.innerHTML = "";
+      Object.entries(settings.custom_hotkeys).forEach(([hk, path]) => {
+        const row = document.createElement("div");
+        row.className = "hotkey-item";
+        row.innerHTML = `
+          <input type="text" value="${hk}" onchange="updateCustomHK('${hk}', this.value, 'key')">
+          <input type="text" value="${path}" onchange="updateCustomHK('${hk}', this.value, 'path')">
+          <span class="remove-btn" onclick="removeCustomHK('${hk}')">Remove</span>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    let allApps = [];
+
+    window.addCustomHotkey = async () => {
+      document.getElementById("app-picker").style.display = "flex";
+      document.getElementById("app-picker-search").value = "";
+      document.getElementById("app-picker-search").focus();
+      
+      if (allApps.length === 0) {
+        allApps = await invoke("get_executable_list");
+      }
+      renderAppPickerList(allApps);
+    };
+
+    window.closeAppPicker = () => {
+      document.getElementById("app-picker").style.display = "none";
+    };
+
+    window.filterApps = () => {
+      const q = document.getElementById("app-picker-search").value.toLowerCase();
+      const filtered = allApps.filter(a => a.name.toLowerCase().includes(q));
+      renderAppPickerList(filtered);
+    };
+
+    function renderAppPickerList(list) {
+      const container = document.getElementById("app-picker-list");
+      container.innerHTML = "";
+      list.forEach(app => {
+        const item = document.createElement("div");
+        item.style.padding = "12px 16px";
+        item.style.borderRadius = "12px";
+        item.style.cursor = "pointer";
+        item.style.background = "rgba(255,255,255,0.03)";
+        item.style.border = "1px solid var(--panel-border)";
+        item.style.transition = "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)";
+        item.innerHTML = `
+          <div style="font-weight:600; font-size:14px; margin-bottom:2px;">${app.name}</div>
+          <div style="font-size:12px; color:var(--text-muted); opacity:0.8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'JetBrains Mono', monospace;">${app.path}</div>
+        `;
+        item.onmouseover = () => {
+          item.style.background = "rgba(255,255,255,0.08)";
+          item.style.borderColor = "rgba(255,255,255,0.2)";
+          item.style.transform = "translateX(2px)";
+        };
+        item.onmouseout = () => {
+          item.style.background = "rgba(255,255,255,0.03)";
+          item.style.borderColor = "var(--panel-border)";
+          item.style.transform = "translateX(0)";
+        };
+        item.onclick = () => {
+          const tempKey = "Unassigned " + Math.floor(Math.random() * 10000);
+          settings.custom_hotkeys[tempKey] = app.path;
+          renderCustomHotkeys();
+          closeAppPicker();
+        };
+        container.appendChild(item);
+      });
+    }
+
+    window.removeCustomHK = (hk) => {
+      delete settings.custom_hotkeys[hk];
+      renderCustomHotkeys();
+    };
+
+    // ── Hotkey Recorder Logic ────────────────────────────────
+    document.addEventListener('keydown', (e) => {
+      const active = document.activeElement;
+      if (active && active.classList.contains('hotkey-recorder')) {
+        e.preventDefault();
+        
+        // Ignore single modifier presses
+        if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+
+        const parts = [];
+        if (e.ctrlKey) parts.push('Ctrl');
+        if (e.altKey) parts.push('Alt');
+        if (e.shiftKey) parts.push('Shift');
+        if (e.metaKey) parts.push('Super');
+
+        // Key mapping (standardizing names for Tauri global-shortcut plugin)
+        let key = e.key;
+        if (key === ' ') key = 'Space';
+        if (key.length === 1) key = key.toUpperCase();
+        
+        parts.push(key);
+        active.value = parts.join('+');
+      }
+    });
+
+    window.updateCustomHK = (oldHk, value, field) => {
+      if (field === 'key') {
+        const path = settings.custom_hotkeys[oldHk];
+        delete settings.custom_hotkeys[oldHk];
+        settings.custom_hotkeys[value] = path;
+      } else {
+        settings.custom_hotkeys[oldHk] = value;
+      }
+      renderCustomHotkeys(); // Re-render immediately to avoid stale DOM bindings
+    };
+
+    window.repairSettings = async () => {
+      if(confirm("This will reset all your settings and custom hotkeys to default. Are you sure?")) {
+        settings.custom_hotkeys = {};
+        settings.main_hotkey = "Alt+Space";
+        settings.clip_hotkey = "Alt+V";
+        settings.theme.accent = "#5c7cfa";
+        renderCustomHotkeys();
+        document.getElementById("hk-main").value = "Alt+Space";
+        document.getElementById("hk-clip").value = "Alt+V";
+        alert("Settings repaired! Please click 'Save Changes' to apply.");
+      }
+    };
+
+    window.saveSettings = async () => {
+      // Collect values
+      settings.theme.accent = document.getElementById("theme-accent").value;
+      settings.theme.bg_top = document.getElementById("theme-bg-top").value;
+      settings.theme.bg_bottom = document.getElementById("theme-bg-bottom").value;
+      
+      settings.main_hotkey = document.getElementById("hk-main").value;
+      settings.clip_hotkey = document.getElementById("hk-clip").value;
+
+      try {
+        await invoke("update_settings", { newSettings: settings });
+        alert("Settings saved & applied!");
+      } catch (err) {
+        alert("Error saving settings: " + err);
+      }
+    };
+
+    load();
+  </script>
+</body>
+</html>

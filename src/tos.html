@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JOR — Terms of Service</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+    :root {
+      --bg: #1b1e22;
+      --accent: #d7dce2;
+      --text: #f1f1f1;
+      --text-muted: #acb1b8;
+      --border: rgba(255, 255, 255, 0.1);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 100vw;
+      height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Space Grotesk", sans-serif;
+      display: flex;
+      flex-direction: column;
+      padding: 40px;
+    }
+
+    h1 { font-size: 28px; margin-bottom: 10px; font-weight: 700; }
+    p.subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 30px; }
+
+    .content {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      overflow-y: auto;
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-muted);
+      margin-bottom: 30px;
+    }
+
+    .content h2 { color: var(--text); font-size: 16px; margin: 20px 0 10px 0; }
+    .content h2:first-child { margin-top: 0; }
+
+    .footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 15px;
+      align-items: center;
+    }
+
+    .btn {
+      background: var(--accent);
+      color: #1b1e22;
+      border: none;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(215, 220, 226, 0.2); }
+    .btn:active { transform: translateY(0); }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    /* Scrollbar */
+    .content::-webkit-scrollbar { width: 6px; }
+    .content::-webkit-scrollbar-track { background: transparent; }
+    .content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Terms of Service</h1>
+  <p class="subtitle">Last updated: April 27, 2026</p>
+
+  <div class="content">
+    <h2>1. Acceptance of Terms</h2>
+    <p>By using JOR (Just Open & Run), you agree to be bound by these terms. If you do not agree, please do not use the application.</p>
+
+    <h2>2. Description of Service</h2>
+    <p>JOR is a high-performance productivity launcher. It provides file indexing, clipboard history management, and custom shortcut execution capabilities.</p>
+
+    <h2>3. Privacy & Data</h2>
+    <p>JOR operates entirely locally on your machine. We do not collect, transmit, or store your personal data, clipboard history, or file indexes on any external servers. Your data stays where it belongs: with you.</p>
+
+    <h2>4. Intellectual Property</h2>
+    <p>The JOR Core Technology, including its search engine, indexing logic, and interface design, is proprietary and protected by copyright. You may not replicate, reverse engineer, or redistribute the core software.</p>
+
+    <h2>5. Plugins</h2>
+    <p>JOR supports third-party plugins. While the core is proprietary, the plugin API is open for community development. Plugins created by users remain the property of their respective creators, subject to the JOR Plugin SDK license.</p>
+
+    <h2>6. Liability</h2>
+    <p>JOR is provided "as is" without warranty of any kind. The developers are not liable for any data loss, system instability, or accidental deletion caused by the use of this software.</p>
+  </div>
+
+  <div class="footer">
+    <button class="btn btn-secondary" onclick="window.__TAURI__.window.getCurrentWindow().close()">Exit</button>
+    <button class="btn" id="accept-btn">I Accept the Terms</button>
+  </div>
+
+  <script type="module">
+    const { invoke } = window.__TAURI__.core;
+    const { getCurrentWindow } = window.__TAURI__.window;
+
+    document.getElementById('accept-btn').onclick = async () => {
+      try {
+        await invoke('accept_terms');
+        await getCurrentWindow().close();
+      } catch (err) {
+        console.error(err);
+      }
+    };
+  </script>
+</body>
+</html>

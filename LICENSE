@@ -1,0 +1,20 @@
+JOR PROPRIETARY LICENSE
+
+Copyright (c) 2026 JOR Productivity Systems. All rights reserved.
+
+1. PROPRIETARY CORE TECHNOLOGY
+The core application code, including but not limited to the JOR engine, search algorithms, indexing architecture, and user interface designs (the "Core Technology"), is the exclusive property of JOR Productivity Systems. 
+
+You are NOT permitted to:
+a. Reproduce, redistribute, or sublicense the Core Technology.
+b. Decompile, reverse engineer, or attempt to derive the source code of the Core Technology.
+c. Modify or create derivative works of the Core Technology.
+
+2. OPEN PLUGIN ARCHITECTURE
+Notwithstanding Section 1, JOR Productivity Systems encourages the development of third-party extensions ("Plugins"). The Plugin API and any specifically designated open-source plugin templates provided by JOR Productivity Systems are licensed under the MIT License. Users are permitted to create, distribute, and monetize their own plugins that interface with the JOR Core Technology.
+
+3. DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+4. TERMINATION
+This license terminates automatically if you fail to comply with its terms. Upon termination, you must cease all use of the Core Technology and destroy all copies in your possession.

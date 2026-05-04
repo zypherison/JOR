@@ -10,6 +10,29 @@ const { invoke } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
 const { listen } = window.__TAURI__.event;
 
+// ── Theme Syncing ───────────────────────────────────────────
+
+function applyTheme(theme) {
+  if (!theme) return;
+  document.documentElement.style.setProperty('--bg-top', theme.bg_top);
+  document.documentElement.style.setProperty('--bg-mid', theme.bg_mid);
+  document.documentElement.style.setProperty('--bg-bottom', theme.bg_bottom);
+  document.documentElement.style.setProperty('--accent', theme.accent);
+  document.documentElement.style.setProperty('--panel-border', theme.panel_border);
+}
+
+listen("theme-changed", (event) => applyTheme(event.payload));
+
+// Load initial theme on startup
+(async () => {
+  try {
+    const settings = await invoke("get_settings");
+    applyTheme(settings.theme);
+  } catch (err) {
+    console.error("Failed to load theme:", err);
+  }
+})();
+
 // ── DOM References ──────────────────────────────────────────
 
 const input   = document.getElementById("search-input");
@@ -38,6 +61,33 @@ const ICONS = {
 };
 
 // ── Utility: Get icon SVG by EntryKind ──────────────────────
+
+const iconCache = new Map();
+const pendingIcons = new Set();
+
+async function loadRealIcon(path, container) {
+  if (iconCache.has(path)) {
+    container.innerHTML = `<img src="${iconCache.get(path)}" style="width:24px;height:24px; border-radius: 4px; object-fit: contain;">`;
+    return;
+  }
+
+  if (pendingIcons.has(path)) return;
+  pendingIcons.add(path);
+
+  try {
+    const b64 = await invoke("get_app_icon", { path });
+    if (b64) {
+      iconCache.set(path, b64);
+      if (container.isConnected) {
+        container.innerHTML = `<img src="${b64}" style="width:24px;height:24px; border-radius: 4px; object-fit: contain;">`;
+      }
+    }
+  } catch (e) {
+    // Keep default SVG icon
+  } finally {
+    pendingIcons.delete(path);
+  }
+}
 
 function getIcon(kind) {
   const map = { 0: "app", 1: "file", 2: "folder", 3: "system", 4: "web", 5: "math", 6: "workflow", 7: "clipboard" };
@@ -170,14 +220,32 @@ function renderResults() {
     // Subtitle: use entry's subtitle, or fallback to type label
     const sub = entry.subtitle || getTypeLabel(entry.kind);
 
-    li.innerHTML = `
-      <div class="item-icon">${getIcon(entry.kind)}</div>
-      <div class="item-text">
-        <div class="item-name">${escapeHtml(entry.name)}</div>
-        <div class="item-sub">${escapeHtml(sub)}</div>
-      </div>
-      ${badge ? `<span class="item-badge">${badge}</span>` : ""}
+    const iconContainer = document.createElement("div");
+    iconContainer.className = "item-icon";
+    iconContainer.innerHTML = getIcon(entry.kind);
+    
+    // Try to load real app icon if it's an app
+    if (entry.kind === 0 && entry.path) {
+      loadRealIcon(entry.path, iconContainer);
+    }
+
+    const textContainer = document.createElement("div");
+    textContainer.className = "item-text";
+    textContainer.innerHTML = `
+      <div class="item-name">${escapeHtml(entry.name)}</div>
+      <div class="item-sub">${escapeHtml(sub)}</div>
     `;
+
+    li.innerHTML = "";
+    li.appendChild(iconContainer);
+    li.appendChild(textContainer);
+    
+    if (badge) {
+      const badgeSpan = document.createElement("span");
+      badgeSpan.className = "item-badge";
+      badgeSpan.innerText = badge;
+      li.appendChild(badgeSpan);
+    }
 
     li.addEventListener("click", () => {
       selectedIndex = i;
@@ -274,6 +342,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       isExploring = false;
       performSearch(++requestSeq);
       setTimeout(() => input.focus(), 10);
+    } else {
+      // Fallback: hide if we lose focus
+      invoke("hide_window");
     }
   });
 

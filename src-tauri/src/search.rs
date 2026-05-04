@@ -86,7 +86,10 @@ impl SearchEngine {
                     let usage = counts.get(&entry.path).copied().unwrap_or(0) as i64;
                     let usage_bonus = usage * 10; // Each launch adds +10 to ranking
 
-                    let total = score + exact_bonus + prefix_bonus + usage_bonus + (entry.score as i64);
+                    // App kind bonus (prioritize applications over random files)
+                    let kind_bonus: i64 = if entry.kind == crate::models::EntryKind::App || entry.kind == crate::models::EntryKind::System { 250 } else { 0 };
+
+                    let total = score + exact_bonus + prefix_bonus + usage_bonus + kind_bonus + (entry.score as i64);
                     let mut e = entry.clone();
                     e.search_score = total;
                     (total, e)
