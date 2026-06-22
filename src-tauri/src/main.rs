@@ -47,6 +47,15 @@ pub struct AppState {
     pub settings: Arc<Mutex<Settings>>,
 }
 
+#[derive(serde::Serialize, Clone)]
+pub struct PluginInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub is_pro: bool,
+    pub enabled: bool,
+}
+
 // ── Tauri Commands ──────────────────────────────────────────
 
 #[tauri::command]
@@ -71,12 +80,37 @@ async fn update_settings(new_settings: Settings, app: tauri::AppHandle, state: S
     Ok(())
 }
 
+#[tauri::command]
+async fn get_plugins(state: State<'_, AppState>) -> Result<Vec<PluginInfo>, String> {
+    let mut infos = Vec::new();
+    for plugin in &state.plugins {
+        infos.push(PluginInfo {
+            id: plugin.id().to_string(),
+            name: plugin.name().to_string(),
+            description: plugin.description().to_string(),
+            is_pro: plugin.is_pro(),
+            enabled: true,
+        });
+    }
+    
+    // Virtual "Plugins" for UI representation
+    infos.push(PluginInfo {
+        id: "hotkeys".to_string(),
+        name: "Global Hotkeys".to_string(),
+        description: "Register custom shortcuts for apps, folders, and workflows.".to_string(),
+        is_pro: true,
+        enabled: true,
+    });
+
+    Ok(infos)
+}
+
 async fn apply_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> {
     // 1. Update hotkeys
     let shortcut_plugin = app.global_shortcut();
     shortcut_plugin.unregister_all().map_err(|e| e.to_string())?;
 
-    // Register Main JOR
+    // Register Main JOR (Always free)
     if let Ok(s) = settings.main_hotkey.parse::<Shortcut>() {
         let _ = shortcut_plugin.on_shortcut(s, |app, _, event| {
             if event.state() == ShortcutState::Pressed {
@@ -85,41 +119,45 @@ async fn apply_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(
         });
     }
 
-    // Register Clip JOR
-    if let Ok(s) = settings.clip_hotkey.parse::<Shortcut>() {
-        let _ = shortcut_plugin.on_shortcut(s, |app, _, event| {
-            if event.state() == ShortcutState::Pressed {
-                toggle_clipboard_window(app);
-            }
-        });
-    }
-
-    // Register Custom Hotkeys
-    for (hk, path) in &settings.custom_hotkeys {
-        if let Ok(s) = hk.parse::<Shortcut>() {
-            let p = path.clone();
-            let _ = shortcut_plugin.on_shortcut(s, move |app, _, event| {
+    // [PREMIUM ONLY] Register Clip JOR
+    if settings.is_premium {
+        if let Ok(s) = settings.clip_hotkey.parse::<Shortcut>() {
+            let _ = shortcut_plugin.on_shortcut(s, |app, _, event| {
                 if event.state() == ShortcutState::Pressed {
-                    let p_clone = p.clone();
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let mut matched_entry = None;
-                        if let Some(state) = app_clone.try_state::<AppState>() {
-                            if let Ok(entries) = state.entries.lock() {
-                                if let Some(e) = entries.iter().find(|e| e.path == p_clone) {
-                                    matched_entry = Some(e.clone());
-                                }
-                            }
-                        }
-                        
-                        if let Some(entry) = matched_entry {
-                            let _ = launch(entry, app_clone).await;
-                        } else {
-                            let _ = app_clone.opener().open_path(&p_clone, None::<&str>);
-                        }
-                    });
+                    toggle_clipboard_window(app);
                 }
             });
+        }
+    }
+
+    // [PREMIUM ONLY] Register Custom Hotkeys
+    if settings.is_premium {
+        for (hk, path) in &settings.custom_hotkeys {
+            if let Ok(s) = hk.parse::<Shortcut>() {
+                let p = path.clone();
+                let _ = shortcut_plugin.on_shortcut(s, move |app, _, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        let p_clone = p.clone();
+                        let app_clone = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let mut matched_entry = None;
+                            if let Some(state) = app_clone.try_state::<AppState>() {
+                                if let Ok(entries) = state.entries.lock() {
+                                    if let Some(e) = entries.iter().find(|e| e.path == p_clone) {
+                                        matched_entry = Some(e.clone());
+                                    }
+                                }
+                            }
+                            
+                            if let Some(entry) = matched_entry {
+                                let _ = launch(entry, app_clone).await;
+                            } else {
+                                let _ = app_clone.opener().open_path(&p_clone, None::<&str>);
+                            }
+                        });
+                    }
+                });
+            }
         }
     }
 
@@ -127,6 +165,27 @@ async fn apply_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(
     app.emit("theme-changed", &settings.theme).map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[tauri::command]
+async fn activate_license(key: String, app: tauri::AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
+    // 1. Validation Logic (MOCK)
+    let is_valid = key.starts_with("JOR-PRO-");
+
+    if is_valid {
+        let settings = {
+            let mut s = state.settings.lock().map_err(|e| e.to_string())?;
+            s.license_key = Some(key);
+            s.is_premium = true;
+            settings::save_settings(&app, &s)?;
+            s.clone()
+        };
+        
+        apply_settings(&app, &settings).await?;
+        Ok(true)
+    } else {
+        Err("Invalid License Key. Please check your purchase receipt.".into())
+    }
 }
 
 #[tauri::command]
@@ -273,12 +332,15 @@ async fn search(query: String, mode: String, state: State<'_, AppState>) -> Resu
         state.engine.search(&query, &entries)
     };
 
-    // Query relevant plugins (excluding clipboard for standard mode)
-    for plugin in &state.plugins {
-        if plugin.id() != "clipboard" {
-            let plugin_results = plugin.search(&query, &mode).await;
-            results.extend(plugin_results);
-        }
+    // Query relevant plugins in PARALLEL for maximum performance
+    let plugin_futures: Vec<_> = state.plugins.iter()
+        .filter(|p| p.id() != "clipboard")
+        .map(|p| p.search(&query, &mode))
+        .collect();
+    
+    let all_plugin_results = futures::future::join_all(plugin_futures).await;
+    for pr in all_plugin_results {
+        results.extend(pr);
     }
 
     // Sort again to ensure plugin results are prioritized by score
@@ -316,10 +378,20 @@ async fn launch(entry: Entry, app: AppHandle) -> Result<(), String> {
             Ok(())
         }
         EntryKind::System => {
-            std::process::Command::new("cmd")
-                .args(["/C", &entry.path])
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            let allowed_system_cmds = [
+                "rundll32.exe powrprof.dll,SetSuspendState 0,1,0",
+                "shutdown /s /t 0",
+                "shutdown /r /t 0"
+            ];
+            
+            if allowed_system_cmds.contains(&entry.path.as_str()) {
+                std::process::Command::new("cmd")
+                    .args(["/C", &entry.path])
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            } else {
+                return Err("Unauthorized system command".into());
+            }
             Ok(())
         }
         EntryKind::Plugin => {
@@ -328,8 +400,8 @@ async fn launch(entry: Entry, app: AppHandle) -> Result<(), String> {
                     if plugin.id() == plugin_id {
                         plugin.execute(action_id).await.map_err(|e| e.to_string())?;
                         
-                        // If it was the clipboard plugin, simulate paste
-                        if plugin_id == "clipboard" {
+                        // If the plugin action was a "copy" or "snippet" action, simulate paste for a seamless experience
+                        if plugin_id == "clipboard" || plugin_id == "snippets" || action_id.starts_with("copy:") {
                             std::thread::spawn(move || {
                                 std::thread::sleep(std::time::Duration::from_millis(300));
                                 unsafe {
@@ -522,13 +594,13 @@ async fn get_executable_list(state: State<'_, AppState>) -> Result<Vec<Entry>, S
         ("Privacy Settings", "ms-settings:privacy", "System Settings"),
         ("Search Settings", "ms-settings:search", "System Settings"),
         ("Task Manager", "taskmgr", "System Utility"),
-        ("Control Panel", "control", "System Utility"),
-        ("Registry Editor", "regedit", "System Utility"),
-        ("Services", "services.msc", "System Utility"),
-        ("Command Prompt", "cmd", "System Utility"),
-        ("PowerShell", "powershell", "System Utility"),
-    ];
-    
+                        ("Control Panel", "control", "System Utility"),
+                        ("Registry Editor", "regedit", "System Utility"),
+                        ("Services", "services.msc", "System Utility"),
+                        ("Command Prompt", "cmd", "System Utility"),
+                        ("PowerShell", "powershell", "System Utility"),
+                    ];
+
     for (name, path, sub) in settings {
         apps.push(Entry {
             name: name.to_string(),
@@ -545,6 +617,63 @@ async fn get_executable_list(state: State<'_, AppState>) -> Result<Vec<Entry>, S
     Ok(apps)
 }
 
+fn setup_analytics(app_handle: &tauri::AppHandle) {
+    let app_dir = app_handle.path().app_data_dir().unwrap_or_default();
+    let lock_file = app_dir.join(".analytics_done");
+
+    if !lock_file.exists() {
+        let _ = std::fs::create_dir_all(&app_dir);
+        let _handle = app_handle.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+
+            let geo_data: serde_json::Value = match reqwest::blocking::get("https://ipapi.co/json/") {
+                Ok(resp) => resp.json().unwrap_or(serde_json::json!({})),
+                Err(_) => serde_json::json!({}),
+            };
+
+            let country = geo_data["country_name"].as_str().unwrap_or("Unknown");
+            let city = geo_data["city"].as_str().unwrap_or("Unknown");
+
+            // LOCAL TESTING URL
+            let dashboard_url = "http://127.0.0.1:5500/JOR/website.html";
+            let payload = serde_json::json!({
+                "event": "install",
+                "platform": "windows",
+                "location": format!("{}, {}", city, country),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            });
+
+            let client = reqwest::blocking::Client::new();
+            if let Ok(_) = client.post(dashboard_url).timeout(std::time::Duration::from_secs(5)).json(&payload).send() {
+                let _ = std::fs::File::create(lock_file);
+            }
+        });
+    }
+}
+
+#[tauri::command]
+async fn deactivate_license(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let settings = {
+        let mut s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.license_key = None;
+        s.is_premium = false;
+        settings::save_settings(&app, &s)?;
+        s.clone()
+    };
+    apply_settings(&app, &settings).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn refresh_jor_data(app: tauri::AppHandle) -> Result<(), String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if app_dir.exists() && app_dir.to_string_lossy().contains("JOR") {
+        let _ = std::fs::remove_dir_all(&app_dir);
+    }
+    std::process::exit(0);
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -552,6 +681,9 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
+            let app_handle = app.handle().clone();
+            setup_analytics(&app_handle);
+            
             let loaded_config = config::load_or_create_config();
             let mut initial_entries = Indexer::index_all(app.handle(), &loaded_config.extra_paths);
             initial_entries.extend(build_workflow_entries(&loaded_config));
@@ -567,19 +699,24 @@ fn main() {
                     Box::new(plugins::clipboard::ClipboardPlugin::new()),
                     Box::new(plugins::converter::ConverterPlugin),
                     Box::new(plugins::window_manager::WindowManagerPlugin),
+                    Box::new(plugins::snippets::SnippetsPlugin::new()),
+                    Box::new(plugins::sys_info::SystemInfoPlugin::new()),
+                    Box::new(plugins::password_gen::PasswordGenPlugin),
+                    Box::new(plugins::timer::TimerPlugin),
+                    Box::new(plugins::color_picker::ColorPickerPlugin),
+                    Box::new(plugins::ip_info::IpPlugin),
+                    Box::new(plugins::weather::WeatherPlugin),
                 ],
                 settings: Arc::new(Mutex::new(user_settings.clone())),
             };
 
             app.manage(state);
             
-            // Background refresh index to keep it fresh
             indexer::Indexer::refresh_index(app.handle(), loaded_config.extra_paths.clone());
 
             let app_handle = app.handle();
             let app_state: State<AppState> = app_handle.state();
 
-            // ── Terms of Service Check ──────────────────────
             if !user_settings.terms_accepted {
                 if let Some(tos_window) = app.get_webview_window("tos") {
                     tos_window.show().ok();
@@ -625,11 +762,16 @@ fn main() {
             // Tray
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::TrayIconBuilder;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let show = MenuItem::with_id(app, "show", "Toggle JOR", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit JOR", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "Open Launcher", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
+            
+            // Try to load the premium logo explicitly
+            let icon = app.default_window_icon().cloned().unwrap();
+            
             let _tray = TrayIconBuilder::<Wry>::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(icon)
+                .tooltip("JOR — Speed of Thought")
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     match event.id.as_ref() {
@@ -649,10 +791,14 @@ fn main() {
             list_directory,
             get_settings,
             update_settings,
+            activate_license,
+            deactivate_license,
+            refresh_jor_data,
             clear_clipboard_history,
             accept_terms,
             get_app_icon,
-            get_executable_list
+            get_executable_list,
+            get_plugins
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

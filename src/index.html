@@ -1,45 +1,259 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JOR — Just Open & Run</title>
-    <link rel="icon" type="image/png" href="../logo.png">
-    <link rel="stylesheet" href="./style.css">
-  </head>
-  <body>
-    <div class="ambient ambient-a"></div>
-    <div class="ambient ambient-b"></div>
-    <div class="ambient-grid"></div>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JOR</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <!-- Ambient background elements from the website -->
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+  <div class="ambient-grid"></div>
 
-    <div id="launcher">
-      <!-- Search Bar -->
-      <div class="search-bar">
-        <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <span class="search-pill">Instant</span>
-        <input
-          type="text"
-          id="search-input"
-          placeholder="Search apps, files, commands..."
-          spellcheck="false"
-          autocomplete="off"
-          autofocus
-        >
-      </div>
+  <!-- Premium Notification Container -->
+  <div id="notification" class="notification-toast"></div>
 
-      <!-- Results -->
-      <ul id="results"></ul>
-
-      <!-- Footer -->
-      <div class="footer">
-        <span><kbd>↑</kbd><kbd>↓</kbd> navigate &nbsp; <kbd>↵</kbd> open &nbsp; <kbd>⎋</kbd> close &nbsp; <kbd>⇥</kbd> autocomplete</span>
-        <span>JOR / Native Rust Index</span>
+  <!-- Data Refresh Modal -->
+  <div id="refresh-modal" class="modal-overlay">
+    <div class="modal">
+      <h2 style="color:var(--accent); margin-bottom:15px;">🔄 Data Refresh</h2>
+      <p style="margin-bottom:25px; opacity:0.8;">Reset all JOR data? This will clear your history and settings, starting you from scratch.</p>
+      
+      <div style="display:flex; gap:15px; justify-content:flex-end;">
+        <button onclick="closeRefresh()" class="btn-cancel">Cancel</button>
+        <button onclick="handleRefresh()" class="btn-danger" style="background:var(--accent);">Confirm Reset</button>
       </div>
     </div>
+  </div>
 
-    <script src="./main.js" defer></script>
-  </body>
+  <div id="launcher">
+    <!-- Search Bar (Reverting to the previous "Search Pill" structure) -->
+    <div class="search-bar">
+      <svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <span class="search-pill">JOR</span>
+      <input
+        type="text"
+        id="search-input"
+        placeholder="Search everything..."
+        spellcheck="false"
+        autocomplete="off"
+        autofocus
+      >
+    </div>
+
+    <!-- Results (Previous efficient structure) -->
+    <ul id="results"></ul>
+
+    <!-- Premium Footer -->
+    <div class="footer">
+      <div class="hints">
+        <span><kbd>↑↓</kbd> navigate</span>
+        <span><kbd>↵</kbd> open</span>
+      </div>
+      <div class="brand-container">
+        <img src="./logo.png" alt="JOR Logo" class="brand-logo" width="16" height="16">
+        <span class="brand-name">JOR.</span>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    const { invoke } = window.__TAURI__.core;
+    const { listen } = window.__TAURI__.event;
+
+    const input = document.getElementById('search-input');
+    const resultsList = document.getElementById('results');
+    
+    let selectedIndex = 0;
+    let entries = [];
+    const iconCache = new Map();
+
+    const ICONS = {
+      APP: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`,
+      FILE: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>`,
+      FOLDER: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+      SYSTEM: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+      WEB: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
+      MATH: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="16" y1="14" x2="16" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg>`,
+      WORKFLOW: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-5c1.62-2.2 5-3 5-3"/><path d="M12 15v5s3.03-.55 5-2c2.2-1.62 3-5 3-5"/></svg>`,
+      CLIPBOARD: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>`,
+    };
+
+    async function performSearch() {
+      const query = input.value;
+      try {
+        entries = await invoke('search', { query, mode: "standard" });
+        renderResults();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function loadIconForEntry(itemElement, entry) {
+      if (entry.kind !== 0 && entry.kind !== 1 && entry.kind !== 3) return;
+
+      if (iconCache.has(entry.path)) {
+        const iconDiv = itemElement.querySelector('.item-icon');
+        iconDiv.innerHTML = `<img src="${iconCache.get(entry.path)}" width="24" height="24" style="border-radius: 4px;" />`;
+        return;
+      }
+
+      try {
+        const base64Icon = await invoke('get_app_icon', { path: entry.path });
+        iconCache.set(entry.path, base64Icon);
+        const iconDiv = itemElement.querySelector('.item-icon');
+        if (iconDiv) {
+          iconDiv.innerHTML = `<img src="${base64Icon}" width="24" height="24" style="border-radius: 4px;" />`;
+        }
+      } catch (e) {
+        // Fallback already rendered
+      }
+    }
+
+    function renderResults() {
+      const fragment = document.createDocumentFragment();
+      entries.forEach((res, i) => {
+        const li = document.createElement('li');
+        li.className = `item ${i === selectedIndex ? 'active' : ''}`;
+        
+        const iconMarkup = getIconMarkup(res);
+        
+        li.innerHTML = `
+          <div class="item-icon">${iconMarkup}</div>
+          <div class="item-text">
+            <div class="item-name">${escapeHtml(res.name)}</div>
+            <div class="item-sub">${escapeHtml(res.subtitle)}</div>
+          </div>
+        `;
+
+        li.onclick = () => executeLaunch(res);
+        fragment.appendChild(li);
+        
+        loadIconForEntry(li, res);
+      });
+
+      resultsList.innerHTML = '';
+      resultsList.appendChild(fragment);
+      
+      const activeItem = resultsList.querySelector('.active');
+      if (activeItem) activeItem.scrollIntoView({ block: 'nearest' });
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function getIconMarkup(res) {
+      if (res.kind === 3 || res.kind === 7) {
+        const n = res.name.toLowerCase();
+        if (n.includes('shut down') || n.includes('power')) return `<svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>`;
+        if (n.includes('restart')) return `<svg viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2.5"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
+        if (n.includes('sleep')) return `<svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2.5"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+      }
+      
+      const maps = {
+        0: ICONS.APP,
+        1: ICONS.FILE,
+        2: ICONS.FOLDER,
+        3: ICONS.SYSTEM,
+        4: ICONS.WEB,
+        5: ICONS.MATH,
+        6: ICONS.WORKFLOW,
+        7: ICONS.SYSTEM,
+        8: ICONS.CLIPBOARD,
+      };
+      return maps[res.kind] || '•';
+    }
+
+    async function executeLaunch(entry) {
+      try {
+        await invoke('launch', { entry });
+        input.value = '';
+        selectedIndex = 0;
+        await invoke('hide_window');
+      } catch (err) {
+        console.error("Launch failed:", err);
+      }
+    }
+
+    window.onkeydown = (e) => {
+      // Prevent Windows System Menu (Alt+Space) when JOR is focused
+      if (e.altKey && e.code === 'Space') {
+        e.preventDefault();
+        return;
+      }
+
+      if (entries.length === 0 && e.key !== 'Escape') return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        selectedIndex = (selectedIndex + 1) % entries.length;
+        renderResults();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        selectedIndex = (selectedIndex - 1 + entries.length) % entries.length;
+        renderResults();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (entries[selectedIndex]) executeLaunch(entries[selectedIndex]);
+      } else if (e.key === 'Escape') {
+        invoke('hide_window');
+      }
+    };
+
+    // ── Data Refresh Logic ───────────────────────────────────────
+    function checkRefresh(q) {
+      const keywords = ['refresh jor', 'reset jor', 'factory reset'];
+      if (keywords.some(k => q.toLowerCase() === k)) {
+        document.getElementById('refresh-modal').style.display = 'flex';
+      }
+    }
+ 
+    function closeRefresh() {
+      document.getElementById('refresh-modal').style.display = 'none';
+      input.value = '';
+    }
+ 
+    async function handleRefresh() {
+      await invoke('refresh_jor_data');
+    }
+
+    // ── Notification System ─────────────────────────────────────
+    function showNotify(msg, type = 'success') {
+      const toast = document.getElementById('notification');
+      toast.innerText = msg;
+      toast.className = `notification-toast active ${type}`;
+      setTimeout(() => { toast.classList.remove('active'); }, 3000);
+    }
+
+    // ── Global Event Listeners ──────────────────────────────────
+    input.oninput = () => {
+      selectedIndex = 0;
+      const q = input.value;
+      const launcher = document.getElementById('launcher');
+      if (q.length > 0) {
+        launcher.classList.add('active');
+        checkRefresh(q);
+      } else {
+        launcher.classList.remove('active');
+      }
+      performSearch();
+    };
+
+    listen('tauri://focus', () => {
+      input.focus();
+    });
+
+    performSearch();
+  </script>
+</body>
 </html>

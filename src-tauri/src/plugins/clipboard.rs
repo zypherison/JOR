@@ -24,6 +24,9 @@ impl ClipboardPlugin {
 impl Plugin for ClipboardPlugin {
     fn id(&self) -> &str { "clipboard" }
     fn name(&self) -> &str { "Clipboard Manager" }
+    fn description(&self) -> &str { "Unified clipboard history with instant search and recovery." }
+    fn trigger_hint(&self) -> &str { "clip" }
+    fn is_pro(&self) -> bool { true }
 
     fn init(&self, app: &tauri::AppHandle) {
         let app_dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::current_dir().unwrap());

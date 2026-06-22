@@ -5,72 +5,48 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JOR Clipboard</title>
   <link rel="stylesheet" href="./style.css">
-  <style>
-    .clear-btn {
-      background: rgba(255, 50, 50, 0.12);
-      border: 1px solid rgba(255, 50, 50, 0.25);
-      color: #ff8888;
-      padding: 6px 14px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: "Inter", sans-serif;
-      text-transform: uppercase;
-      transition: all 0.2s;
-    }
-    .clear-btn:hover { background: rgba(255, 50, 50, 0.2); border-color: rgba(255, 50, 50, 0.4); }
-  </style>
 </head>
 <body>
+  <!-- Ambient background elements -->
   <div class="ambient ambient-b"></div>
   <div class="ambient-grid"></div>
-  <div id="launcher">
-    <div class="search-bar">
-      <span class="search-pill">Clipboard</span>
-      <input type="text" id="search-input" placeholder="Search history..." autocomplete="off" autofocus>
-      <button class="clear-btn" id="clear-btn">Clear All</button>
+
+  <div id="launcher" class="launcher-compact">
+    <div class="search-bar" style="gap: 12px; padding: 16px 22px;">
+      <svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      <span class="search-pill" style="background: rgba(139, 92, 246, 0.15); color: var(--accent); padding: 3px 10px; font-size: 9px; letter-spacing: 1px;">CLIP</span>
+      <input type="text" id="search-input" placeholder="Search history..." autocomplete="off" autofocus style="font-size: 22px;">
+      <button id="clear-btn" class="btn" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #ef4444; padding: 5px 12px; border-radius: 8px; font-size: 10px; font-weight: 700; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px;">Clear</button>
     </div>
+
     <ul id="results"></ul>
+
     <div class="footer">
-      <span><kbd>↑</kbd><kbd>↓</kbd> navigate &nbsp; <kbd>↵</kbd> copy &nbsp; <kbd>⎋</kbd> close</span>
-      <span>JOR Clip v1.0</span>
+      <div class="hints">
+        <span><kbd>↑↓</kbd> navigate &nbsp; <kbd>↵</kbd> paste</span>
+      </div>
+      <div class="brand-container">
+        <img src="./logo.png" alt="JOR Logo" class="brand-logo" width="16" height="16">
+        <span class="brand-name">JOR Clip.</span>
+      </div>
     </div>
   </div>
 
   <script type="module">
     const { invoke } = window.__TAURI__.core;
-    const { getCurrentWindow } = window.__TAURI__.window;
     const { listen } = window.__TAURI__.event;
 
-    // ── Theme Syncing ───────────────────────────────────────────
-    function applyTheme(theme) {
-      if (!theme) return;
-      document.documentElement.style.setProperty('--bg-top', theme.bg_top);
-      document.documentElement.style.setProperty('--bg-mid', theme.bg_mid);
-      document.documentElement.style.setProperty('--bg-bottom', theme.bg_bottom);
-      document.documentElement.style.setProperty('--accent', theme.accent);
-      document.documentElement.style.setProperty('--panel-border', theme.panel_border);
-    }
-
-    listen("theme-changed", (event) => applyTheme(event.payload));
-
-    (async () => {
-      try {
-        const settings = await invoke("get_settings");
-        applyTheme(settings.theme);
-      } catch (err) {
-        console.error("Failed to load theme:", err);
-      }
-    })();
-
     const input = document.getElementById("search-input");
-    const results = document.getElementById("results");
+    const resultsList = document.getElementById("results");
     const clearBtn = document.getElementById("clear-btn");
-    const appWindow = getCurrentWindow();
 
     let selectedIndex = 0;
     let entries = [];
+
+    const CLIPBOARD_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>`;
 
     async function performSearch() {
       const query = input.value;
@@ -83,40 +59,55 @@
     }
 
     function renderResults() {
-      results.innerHTML = "";
+      const fragment = document.createDocumentFragment();
       if (entries.length === 0) {
-        results.innerHTML = `<div style="text-align: center; padding: 40px; color: #888; font-size: 12px; font-family: 'JetBrains Mono'">No history found.</div>`;
+        resultsList.innerHTML = `<div class="empty">No history found.</div>`;
         return;
       }
 
-      entries.forEach((entry, i) => {
+      entries.forEach((res, i) => {
         const li = document.createElement("li");
         li.className = "item" + (i === selectedIndex ? " active" : "");
         li.innerHTML = `
-          <div class="item-icon">
-            <svg viewBox="0 0 24 24" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-          </div>
+          <div class="item-icon">${CLIPBOARD_ICON}</div>
           <div class="item-text">
-            <div class="item-name">${entry.name}</div>
-            <div class="item-sub">${entry.subtitle}</div>
+            <div class="item-name">${escapeHtml(res.name)}</div>
+            <div class="item-sub">${escapeHtml(res.subtitle)}</div>
           </div>
         `;
-        li.onclick = () => executeEntry(entry);
-        results.appendChild(li);
-        if (i === selectedIndex) li.scrollIntoView({ block: "nearest" });
+        li.onclick = () => executeEntry(res);
+        fragment.appendChild(li);
       });
+
+      resultsList.innerHTML = "";
+      resultsList.appendChild(fragment);
+      
+      const activeItem = resultsList.querySelector('.active');
+      if (activeItem) activeItem.scrollIntoView({ block: "nearest" });
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
     }
 
     async function executeEntry(entry) {
-      await invoke("launch", { entry });
-      // The window will be hidden by the backend launch logic
+      try {
+        await invoke("launch", { entry });
+      } catch (err) {
+        console.error("Paste failed:", err);
+      }
     }
 
     input.oninput = () => {
       selectedIndex = 0;
+      const launcher = document.getElementById('launcher');
+      if (input.value.length > 0) {
+        launcher.classList.add('active');
+      } else {
+        launcher.classList.remove('active');
+      }
       performSearch();
     };
 
@@ -143,14 +134,10 @@
       }
     };
 
-    // Auto-focus on show
-    appWindow.onFocusChanged(({ payload: focused }) => {
-      if (focused) {
-        input.value = "";
-        performSearch();
-        input.focus();
-        setTimeout(() => input.focus(), 50);
-      }
+    listen('tauri://focus', () => {
+      input.value = "";
+      performSearch();
+      input.focus();
     });
 
     performSearch();

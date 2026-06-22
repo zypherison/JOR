@@ -30,6 +30,15 @@ impl ClipboardDatabase {
             "INSERT INTO clipboard_history (content) VALUES (?)",
             params![content],
         )?;
+        
+        // Prune old entries to keep db fast (keep last 200)
+        self.conn.execute(
+            "DELETE FROM clipboard_history WHERE id NOT IN (
+                SELECT id FROM clipboard_history ORDER BY id DESC LIMIT 200
+            )",
+            [],
+        )?;
+        
         Ok(())
     }
 

@@ -33,6 +33,10 @@ pub struct Settings {
     pub clip_hotkey: String,
     pub custom_hotkeys: HashMap<String, String>,
     pub terms_accepted: bool,
+    #[serde(default)]
+    pub license_key: Option<String>,
+    #[serde(default)]
+    pub is_premium: bool,
 }
 
 impl Default for Settings {
@@ -44,6 +48,8 @@ impl Default for Settings {
             clip_hotkey: "Alt+V".into(),
             custom_hotkeys: HashMap::new(),
             terms_accepted: false,
+            license_key: None,
+            is_premium: false,
         }
     }
 }

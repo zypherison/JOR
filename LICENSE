@@ -1,20 +1,31 @@
-JOR PROPRIETARY LICENSE
+PROPRIETARY LICENSE AGREEMENT — JOR PRODUCTIVITY SYSTEMS
 
-Copyright (c) 2026 JOR Productivity Systems. All rights reserved.
+Copyright (c) 2026 zypherison, Saif-Ali-Baig, zeo-nyx. All rights reserved.
 
-1. PROPRIETARY CORE TECHNOLOGY
-The core application code, including but not limited to the JOR engine, search algorithms, indexing architecture, and user interface designs (the "Core Technology"), is the exclusive property of JOR Productivity Systems. 
+1. DEFINITIONS
+"Software" refers to JOR (Just Open & Run), including all binary files, source code, documentation, and associated assets.
+"Creators" refers to the individuals: zypherison, Saif-Ali-Baig, and zeo-nyx.
 
-You are NOT permitted to:
-a. Reproduce, redistribute, or sublicense the Core Technology.
-b. Decompile, reverse engineer, or attempt to derive the source code of the Core Technology.
-c. Modify or create derivative works of the Core Technology.
+2. OWNERSHIP
+The Software is the sole and exclusive property of the Creators. It is protected by copyright and other intellectual property laws. This agreement does not grant the User any ownership rights to the Software.
 
-2. OPEN PLUGIN ARCHITECTURE
-Notwithstanding Section 1, JOR Productivity Systems encourages the development of third-party extensions ("Plugins"). The Plugin API and any specifically designated open-source plugin templates provided by JOR Productivity Systems are licensed under the MIT License. Users are permitted to create, distribute, and monetize their own plugins that interface with the JOR Core Technology.
+3. LICENSE GRANT
+The Creators hereby grant the User a non-exclusive, non-transferable license to use the Software solely for personal or professional productivity purposes. 
 
-3. DISCLAIMER OF WARRANTY
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+4. RESTRICTIONS
+The User shall NOT:
+a) Decompile, disassemble, or reverse engineer the Software.
+b) Redistribute, sell, lease, or sublicense the Software without express written consent from the Creators.
+c) Modify or create derivative works based on the Software.
+d) Remove or obscure any copyright notices or branding from the Software.
 
-4. TERMINATION
-This license terminates automatically if you fail to comply with its terms. Upon termination, you must cease all use of the Core Technology and destroy all copies in your possession.
+5. PREMIUM FEATURES
+Certain features (JOR Pro) require a valid license key for activation. Unauthorized bypass of these restrictions is a violation of this agreement.
+
+6. NO WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. THE CREATORS SHALL NOT BE LIABLE FOR ANY DAMAGES ARISING FROM THE USE OF THIS SOFTWARE.
+
+7. TERMINATION
+The Creators reserve the right to terminate this license if the User fails to comply with any terms of this agreement.
+
+By installing or using JOR, you acknowledge that you have read, understood, and agreed to be bound by the terms of this Proprietary License.

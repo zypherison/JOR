@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JOR — Speed of Thought</title>
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --accent: #8b5cf6;
+      --accent-glow: rgba(139, 92, 246, 0.5);
+      --bg-dark: #0a0a0c;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: 'Outfit', sans-serif;
+      overflow-x: hidden;
+      line-height: 1.6;
+    }
+
+    /* Premium Background */
+    .nebula {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background: 
+        radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 80% 70%, rgba(79, 70, 229, 0.05) 0%, transparent 40%);
+    }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+    /* Header */
+    header {
+      padding: 40px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .logo { font-size: 28px; font-weight: 800; letter-spacing: -1px; display: flex; align-items: center; gap: 12px; }
+    .logo span { color: var(--accent); }
+
+    .nav-links { display: flex; gap: 32px; list-style: none; }
+    .nav-links a { text-decoration: none; color: var(--text-muted); font-weight: 500; transition: color 0.2s; }
+    .nav-links a:hover { color: var(--text-main); }
+
+    /* Hero */
+    .hero {
+      padding: 120px 0 80px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: 82px;
+      font-weight: 800;
+      letter-spacing: -3px;
+      line-height: 1;
+      margin-bottom: 24px;
+      background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 22px;
+      color: var(--text-muted);
+      max-width: 700px;
+      margin: 0 auto 48px;
+    }
+
+    .cta-group { display: flex; gap: 16px; justify-content: center; align-items: center; }
+    .btn {
+      padding: 16px 32px;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 8px 24px var(--accent-glow);
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 32px var(--accent-glow); background: #a78bfa; }
+
+    .winget-box {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 14px 20px;
+      border-radius: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--accent);
+    }
+    .winget-box span { color: var(--text-muted); opacity: 0.5; }
+
+    /* Features Grid */
+    .features { padding: 100px 0; }
+    .section-tag { font-size: 12px; font-weight: 800; color: var(--accent); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 16px; display: block; text-align: center; }
+    .section-title { font-size: 42px; font-weight: 700; text-align: center; margin-bottom: 60px; letter-spacing: -1px; }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 32px;
+    }
+    .feature-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 40px;
+      border-radius: 24px;
+      transition: all 0.3s ease;
+    }
+    .feature-card:hover { background: rgba(255, 255, 255, 0.04); border-color: rgba(139, 92, 246, 0.2); transform: translateY(-4px); }
+    .feature-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+    .feature-card p { color: var(--text-muted); font-size: 15px; }
+    .feature-badge { font-size: 10px; font-weight: 800; background: rgba(139, 92, 246, 0.1); color: var(--accent); padding: 4px 10px; border-radius: 6px; margin-left: 10px; }
+
+    /* Authors */
+    .authors { padding: 100px 0; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+    .author-list { display: flex; justify-content: center; gap: 80px; margin-top: 40px; }
+    .author-item { text-align: center; }
+    .author-item .avatar { width: 100px; height: 100px; border-radius: 50%; background: linear-gradient(135deg, #1e1e24 0%, #0a0a0c 100%); border: 2px solid rgba(255, 255, 255, 0.1); margin-bottom: 20px; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 800; color: var(--accent); }
+    .author-item h4 { font-size: 18px; font-weight: 700; }
+    .author-item p { font-size: 14px; color: var(--text-muted); }
+
+    /* Footer */
+    footer {
+      padding: 80px 0 40px;
+      text-align: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .footer-copy { font-size: 14px; color: var(--text-muted); margin-bottom: 20px; }
+    .proprietary-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--accent); opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div class="nebula"></div>
+
+  <div class="container">
+    <header>
+      <div class="logo">JOR<span>•</span>SYSTEMS</div>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#">Pro</a></li>
+        <li><a href="#">Security</a></li>
+        <li><a href="#authors">Creators</a></li>
+      </ul>
+      <a href="#" class="btn btn-primary" style="padding: 10px 24px; font-size: 14px;">Download Now</a>
+    </header>
+
+    <section class="hero">
+      <h1>Speed of Thought.</h1>
+      <p>The premium productivity platform for Windows power users. Modular, private, and proprietary technology built for extreme efficiency.</p>
+      
+      <div class="cta-group">
+        <a href="#" class="btn btn-primary">Download Executable</a>
+        <div class="winget-box">
+          <span>></span> winget install Jor.jor
+        </div>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <span class="section-tag">Powerful Ecosystem</span>
+      <h2 class="section-title">10+ Professional Features</h2>
+      
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h3>Clipboard Manager <span class="feature-badge">PRO</span></h3>
+          <p>Instant access to your full copy history. Search, filter, and paste with sub-millisecond latency.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Text Snippets <span class="feature-badge">PRO</span></h3>
+          <p>Expand keywords into full paragraphs. Type !sig for signatures or !sh for quick replies.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Hyper-Local Weather <span class="feature-badge">PRO</span></h3>
+          <p>Real-time atmospheric diagnostics and forecasts integrated directly into your interaction loop.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Natural Converter</h3>
+          <p>Convert units, temperatures, and currencies naturally. Type "10kg in lbs" and get instant results.</p>
+        </div>
+        <div class="feature-card">
+          <h3>System Monitor</h3>
+          <p>Real-time hardware performance tracking. Monitor CPU and RAM without opening heavy dashboards.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Password Generator</h3>
+          <p>Instant, cryptographically secure password creation for any platform or service.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="authors" id="authors">
+      <span class="section-tag">Engineering Excellence</span>
+      <h2 class="section-title">The Architects</h2>
+      
+      <div class="author-list">
+        <div class="author-item">
+          <div class="avatar">Z</div>
+          <h4>zypherison</h4>
+          <p>Lead Architect</p>
+        </div>
+        <div class="author-item">
+          <div class="avatar">S</div>
+          <h4>Saif-Ali-Baig</h4>
+          <p>Core Systems Engineer</p>
+        </div>
+        <div class="author-item">
+          <div class="avatar">N</div>
+          <h4>zeo-nyx</h4>
+          <p>Principal Developer</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <p class="footer-copy">&copy; 2026 JOR Productivity Systems. All rights reserved.</p>
+      <p class="proprietary-tag">Proprietary Technology • Closed Source • Maximum Privacy</p>
+    </footer>
+  </div>
+</body>
+</html>

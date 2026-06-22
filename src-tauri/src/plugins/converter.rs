@@ -56,6 +56,9 @@ lazy_static::lazy_static! {
 impl Plugin for ConverterPlugin {
     fn id(&self) -> &str { "converter" }
     fn name(&self) -> &str { "Natural Converter" }
+    fn description(&self) -> &str { "Convert units, currencies, and data naturally." }
+    fn trigger_hint(&self) -> &str { "10kg to lbs" }
+    fn is_pro(&self) -> bool { false }
 
     async fn search(&self, query: &str, _mode: &str) -> Vec<Entry> {
         let q = query.trim();
