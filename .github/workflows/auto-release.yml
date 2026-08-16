@@ -26,6 +26,10 @@ jobs:
   build-and-release:
     runs-on: windows-latest
 
+    # Make the GitHub CLI (gh) available in steps that inspect releases.
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     steps:
       # ── Checkout (builds the pushed working tree as-is) ──
       - uses: actions/checkout@v4
