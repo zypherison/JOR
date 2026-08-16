@@ -77,4 +77,4 @@ npm run tauri dev
 npm run tauri build
 ```
 
-> Release binaries are produced automatically by the `auto-release` GitHub Action on every push to `main`, each tagged with a fresh `vX.Y.Z` (existing releases are never overwritten). The `release` workflow is manual-only and drives the stable `v1.0.0` winget pipeline.
+> Release binaries are produced automatically by the `auto-release` GitHub Action on every push to **any** branch — each push publishes a brand-new prerelease tagged `<branch>.<iteration>` (e.g. `optimized-overhaul.1`, `optimized-overhaul.2`). Existing releases, including the stable `v1.0.0`, are never modified or overwritten. The `release` workflow is manual-only and drives the stable `v1.0.0` winget pipeline.

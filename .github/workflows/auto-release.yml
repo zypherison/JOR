@@ -1,79 +1,81 @@
-name: "Auto Release JOR"
+name: "Branch Auto Release"
 
-# Builds the Windows installer on every push to `main` and publishes a
-# BRAND-NEW GitHub release each time. The version is derived from the
-# highest existing vX.Y.Z release tag and bumped by one patch number, so
-# previously published releases are never overwritten.
+# Builds the pushed branch and publishes a BRAND-NEW GitHub release on every
+# push to ANY branch. Releases are tagged "<branch>.<iteration>" (e.g.
+# optimized-overhaul.1, optimized-overhaul.2) so they can never collide with
+# or modify existing releases such as the stable v1.0.0.
+#
+# Runs are serialized per branch (concurrency group) and the tag is guarded
+# against existing releases, so an iteration number is never reused and no
+# existing release is ever touched.
 
 on:
   push:
     branches:
-      - main
+      - "**"
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
     runs-on: windows-latest
 
     steps:
-      # ── Checkout ─────────────────────────────────────────
+      # ── Checkout (builds the pushed working tree as-is) ──
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Full history needed for tag detection + changelog
+          fetch-depth: 0 # Full history for the changelog
 
-      # ── Compute next version from the latest release ─────
-      - name: Compute next version
+      # ── Compute release tag: <branch>.<iteration> ────────
+      - name: Compute release tag (branch + iteration)
         id: version
         shell: pwsh
         run: |
-          $releases = gh release list --limit 100 --json tagName | ConvertFrom-Json
-          $versions = @($releases | ForEach-Object { $_.tagName } | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } | ForEach-Object {
-            if ($_ -match '^v(\d+)\.(\d+)\.(\d+)$') {
-              [pscustomobject]@{ Tag = $_; Major = [int]$matches[1]; Minor = [int]$matches[2]; Patch = [int]$matches[3] }
+          # Sanitize the branch name into a tag-safe form (slashes -> dashes).
+          $branch = "${{ github.ref_name }}"
+          $safe = ($branch -replace '[^A-Za-z0-9._-]', '-')
+          $prefix = "${safe}."
+
+          # Find the highest iteration already published for this branch.
+          $iter = 0
+          $releases = gh release list --limit 1000 --json tagName | ConvertFrom-Json
+          foreach ($r in $releases) {
+            $tag = $r.tagName
+            if ($tag.StartsWith($prefix)) {
+              $n = 0
+              if ([int]::TryParse($tag.Substring($prefix.Length), [ref]$n) -and $n -gt $iter) {
+                $iter = $n
+              }
             }
-          })
-
-          if ($versions.Count -gt 0) {
-            $latest = $versions | Sort-Object Major, Minor, Patch -Descending | Select-Object -First 1
-            $major = $latest.Major
-            $minor = $latest.Minor
-            $patch = $latest.Patch + 1
-            $lastTag = $latest.Tag
-          } else {
-            $major = 1
-            $minor = 0
-            $patch = 0
-            $lastTag = ""
           }
+          $iter++
 
-          # Guard against tag collisions (e.g. a deleted release re-pushed)
-          $next = "v$major.$minor.$patch"
+          # Guard: never reuse an existing tag (double safety).
+          $tag = "$prefix$iter"
           while ($true) {
-            gh release view $next --json tagName 2>$null | Out-Null
+            gh release view $tag --json tagName 2>$null | Out-Null
             if ($LASTEXITCODE -ne 0) { break }
-            $patch++
-            $next = "v$major.$minor.$patch"
+            $iter++
+            $tag = "$prefix$iter"
           }
 
-          echo "VERSION=$next" >> $env:GITHUB_OUTPUT
-          echo "VERSION_NUM=$major.$minor.$patch" >> $env:GITHUB_OUTPUT
-          echo "LAST_TAG=$lastTag" >> $env:GITHUB_OUTPUT
+          echo "BRANCH=$branch" >> $env:GITHUB_OUTPUT
+          echo "TAG=$tag" >> $env:GITHUB_OUTPUT
+          echo "ITERATION=$iter" >> $env:GITHUB_OUTPUT
 
-      # ── Build a changelog from commits since the last tag ─
+      # ── Build a small changelog from recent commits ───────
       - name: Build changelog
         id: changelog
         shell: pwsh
         run: |
-          $lastTag = "${{ steps.version.outputs.LAST_TAG }}"
-          if ($lastTag) {
-            $log = git log --oneline "$lastTag..HEAD" 2>$null
-          } else {
-            $log = git log --oneline -20
-          }
-          if (-not $log) { $log = @("Initial release") }
+          $log = git log --oneline -15
+          if (-not $log) { $log = @("Initial build") }
           $body = "## What's Changed`n`n" + ($log -join "`n")
           $body | Out-File -FilePath changelog.txt -Encoding utf8
 
@@ -83,11 +85,13 @@ jobs:
         run: |
           { echo 'releaseBody<<EOF'; cat changelog.txt; echo 'EOF'; } >> "$GITHUB_OUTPUT"
 
-      # ── Sync version into project files ──────────────────
+      # ── Sync a unique numeric version into project files ──
+      # 1.0.0.<iteration> keeps every build's installer distinct (valid for
+      # MSI/NSIS) without ever conflicting with the stable v1.0.0.
       - name: Sync version into project files
         shell: pwsh
         run: |
-          $ver = "${{ steps.version.outputs.VERSION_NUM }}"
+          $ver = "1.0.0.${{ steps.version.outputs.ITERATION }}"
 
           # Update tauri.conf.json
           $tauri = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
@@ -131,8 +135,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ steps.version.outputs.VERSION }}
-          releaseName: "JOR ${{ steps.version.outputs.VERSION }}"
+          tagName: ${{ steps.version.outputs.TAG }}
+          releaseName: "JOR — ${{ steps.version.outputs.BRANCH }} #${{ steps.version.outputs.ITERATION }}"
           releaseBody: ${{ steps.body.outputs.releaseBody }}
           releaseDraft: false
-          prerelease: false
+          prerelease: true
