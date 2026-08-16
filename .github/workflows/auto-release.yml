@@ -92,13 +92,14 @@ jobs:
         run: |
           { echo 'releaseBody<<EOF'; cat changelog.txt; echo 'EOF'; } >> "$GITHUB_OUTPUT"
 
-      # ── Sync a unique numeric version into project files ──
-      # 1.0.0.<iteration> keeps every build's installer distinct (valid for
-      # MSI/NSIS) without ever conflicting with the stable v1.0.0.
+      # ── Sync a unique version into project files ─────────
+      # 1.0.<iteration> is strict semver (required by tauri.conf.json) and
+      # MSI/NSIS-safe, bumps per branch build, and never collides with the
+      # stable v1.0.0.
       - name: Sync version into project files
         shell: pwsh
         run: |
-          $ver = "1.0.0.${{ steps.version.outputs.ITERATION }}"
+          $ver = "1.0.${{ steps.version.outputs.ITERATION }}"
 
           # Update tauri.conf.json
           $tauri = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
