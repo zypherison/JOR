@@ -22,7 +22,7 @@ impl Plugin for TimerPlugin {
                         Entry {
                             name: format!("Start {} minute timer", mins),
                             name_lower: "timer".to_string(),
-                            path: format!("start:{}", mins),
+                            path: format!("timer:start:{}", mins),
                             subtitle: "Timer • Will notify you when done".to_string(),
                             kind: EntryKind::Plugin,
                             score: 100,
@@ -36,7 +36,7 @@ impl Plugin for TimerPlugin {
                 Entry {
                     name: "Start 25m Focus Timer (Pomodoro)".to_string(),
                     name_lower: "timer".to_string(),
-                    path: "start:25".to_string(),
+                    path: "timer:start:25".to_string(),
                     subtitle: "Timer • Standard focus block".to_string(),
                     kind: EntryKind::Plugin,
                     score: 90,

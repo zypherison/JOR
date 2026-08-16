@@ -3,8 +3,17 @@ use crate::models::{Entry, EntryKind};
 use async_trait::async_trait;
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-pub struct ConverterPlugin;
+/// FX rates are re-fetched at most every 6 hours per currency pair.
+const RATE_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Currencies covered by the Frankfurter API (ECB reference rates).
+const CURRENCIES: &[&str] = &[
+    "usd", "eur", "gbp", "jpy", "chf", "cad", "aud", "nzd", "sek", "nok", "dkk",
+    "hkd", "sgd", "krw", "inr", "cny", "mxn", "zar", "brl", "pln", "try",
+];
 
 struct ConversionRule {
     factor: f64,
@@ -42,22 +51,59 @@ lazy_static::lazy_static! {
         m.insert("pounds".to_string(), ConversionRule { factor: 0.453592, category: "weight" });
         m.insert("oz".to_string(), ConversionRule { factor: 0.0283495, category: "weight" });
         m.insert("ounce".to_string(), ConversionRule { factor: 0.0283495, category: "weight" });
-        
+
         m
     };
-    
+
     // Very permissive regexes
     static ref RE_NATURAL: Regex = Regex::new(r"(?i)(?:convert\s+)?([\d\.]+)\s*([a-z]+)\s+(?:to|in|into|as)\s+([a-z]+)").unwrap();
     static ref RE_QUERY: Regex = Regex::new(r"(?i)(?:what\s+is\s+)?([\d\.]+)\s*([a-z]+)\s+(?:in|as)\s+([a-z]+)").unwrap();
     static ref RE_HOW_MANY: Regex = Regex::new(r"(?i)how\s+many\s+([a-z]+)\s+(?:are\s+in|in|is)\s+([\d\.]+)\s*([a-z]+)").unwrap();
 }
 
+pub struct ConverterPlugin {
+    /// (from, to) -> (fetched_at, rate). Rates expire after RATE_CACHE_TTL.
+    rate_cache: Mutex<HashMap<(String, String), (Instant, f64)>>,
+}
+
+impl ConverterPlugin {
+    pub fn new() -> Self {
+        Self {
+            rate_cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Fetch a live FX rate from the Frankfurter API, caching it briefly.
+    /// The API is case-insensitive but returns uppercase currency codes.
+    async fn get_rate(&self, from: &str, to: &str) -> Option<f64> {
+        if let Ok(cache) = self.rate_cache.lock() {
+            if let Some((fetched_at, rate)) = cache.get(&(from.to_string(), to.to_string())) {
+                if fetched_at.elapsed() < RATE_CACHE_TTL {
+                    return Some(*rate);
+                }
+            }
+        }
+
+        let from_up = from.to_uppercase();
+        let to_up = to.to_uppercase();
+        let url = format!("https://api.frankfurter.app/latest?from={}&to={}", from_up, to_up);
+        let resp = reqwest::get(&url).await.ok()?;
+        let json: serde_json::Value = resp.json().await.ok()?;
+        let rate = json["rates"][&to_up].as_f64()?;
+
+        if let Ok(mut cache) = self.rate_cache.lock() {
+            cache.insert((from.to_string(), to.to_string()), (Instant::now(), rate));
+        }
+        Some(rate)
+    }
+}
+
 #[async_trait]
 impl Plugin for ConverterPlugin {
     fn id(&self) -> &str { "converter" }
     fn name(&self) -> &str { "Natural Converter" }
-    fn description(&self) -> &str { "Convert units, currencies, and data naturally." }
-    fn trigger_hint(&self) -> &str { "10kg to lbs" }
+    fn description(&self) -> &str { "Convert units, temperatures, and currencies naturally." }
+    fn trigger_hint(&self) -> &str { "10kg to lbs · 10 usd to eur" }
     fn is_pro(&self) -> bool { false }
 
     async fn search(&self, query: &str, _mode: &str) -> Vec<Entry> {
@@ -76,7 +122,7 @@ impl Plugin for ConverterPlugin {
         };
 
         if let Some((amount, from_unit, to_unit)) = match_result {
-            if let Some(entry) = self.try_convert(amount, &from_unit, &to_unit) {
+            if let Some(entry) = self.try_convert(amount, &from_unit, &to_unit).await {
                 return vec![entry];
             }
         }
@@ -85,17 +131,17 @@ impl Plugin for ConverterPlugin {
     }
 
     async fn execute(&self, action_id: &str) -> Result<(), String> {
-        if action_id != "currency_stub" {
-            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                clipboard.set_text(action_id.to_string()).ok();
-            }
+        // action_id carries the computed result value; copy it to the clipboard.
+        if action_id.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+        clipboard.set_text(action_id.to_string()).map_err(|e| e.to_string())
     }
 }
 
 impl ConverterPlugin {
-    fn try_convert(&self, amount: f64, from_unit: &str, to_unit: &str) -> Option<Entry> {
+    async fn try_convert(&self, amount: f64, from_unit: &str, to_unit: &str) -> Option<Entry> {
         // Temperature
         let f_unit = from_unit.trim_end_matches('s'); // rudimentary plural handling
         let t_unit = to_unit.trim_end_matches('s');
@@ -116,19 +162,22 @@ impl ConverterPlugin {
                 return Some(self.create_entry(result, to_unit, amount, from_unit));
             }
         }
-        
-        // Currency stub
-        let currency_units = ["usd", "eur", "gbp", "inr", "jpy", "cad", "aud"];
-        if currency_units.contains(&f_unit) && currency_units.contains(&t_unit) {
-            return Some(Entry {
-                name: format!("Convert {} {} to {}...", amount, from_unit, to_unit),
-                name_lower: "".to_string(),
-                path: "currency_stub".to_string(),
-                subtitle: "Converter • Currency API coming soon".to_string(),
-                kind: EntryKind::Plugin,
-                score: 95,
-                search_score: 1000, 
-            });
+
+        // Currencies — live rates via Frankfurter (ECB reference rates).
+        if CURRENCIES.contains(&f_unit) && CURRENCIES.contains(&t_unit) {
+            if let Some(rate) = self.get_rate(f_unit, t_unit).await {
+                let result = amount * rate;
+                return Some(Entry {
+                    name: format!("{:.2} {} = {:.2} {}", amount, f_unit.to_uppercase(), result, t_unit.to_uppercase()),
+                    name_lower: "".to_string(),
+                    path: format!("converter:{:.4}", result),
+                    subtitle: format!("Converter • Live FX · {} {} → {}", amount, f_unit.to_uppercase(), t_unit.to_uppercase()),
+                    kind: EntryKind::Plugin,
+                    score: 100,
+                    search_score: 1000,
+                });
+            }
+            // Offline / API failure — fall through to no result rather than a dead entry.
         }
 
         None
@@ -138,7 +187,7 @@ impl ConverterPlugin {
         Entry {
             name: format!("{:.4} {}", result, to_unit),
             name_lower: "".to_string(),
-            path: format!("{:.4}", result),
+            path: format!("converter:{:.4}", result),
             subtitle: format!("Converter • {} {} to {}", amount, from_unit, to_unit),
             kind: EntryKind::Plugin,
             score: 100,

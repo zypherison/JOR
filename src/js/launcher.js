@@ -1,76 +1,55 @@
 // ─────────────────────────────────────────────────────────────
-// JOR — Frontend Controller
-// Handles real-time search, keyboard navigation, Tab
-// autocomplete, math evaluation, web search, and
-// directory browsing. Zero dependencies — pure vanilla JS
-// talking to Tauri via window.__TAURI__.
+// JOR — Launcher Window Controller
+// Real-time search with debounce + stale-response guarding,
+// keyboard navigation, Tab autocomplete, math evaluation, web
+// search, directory browsing, real app icons, and theme sync.
+// Pure vanilla JS talking to Tauri via window.__TAURI__.
 // ─────────────────────────────────────────────────────────────
+
+import { getIcon, getTypeLabel, escapeHtml, applyTheme } from "./shared.js";
 
 const { invoke } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
 const { listen } = window.__TAURI__.event;
 
-// ── Theme Syncing ───────────────────────────────────────────
-
-function applyTheme(theme) {
-  if (!theme) return;
-  document.documentElement.style.setProperty('--bg-top', theme.bg_top);
-  document.documentElement.style.setProperty('--bg-mid', theme.bg_mid);
-  document.documentElement.style.setProperty('--bg-bottom', theme.bg_bottom);
-  document.documentElement.style.setProperty('--accent', theme.accent);
-  document.documentElement.style.setProperty('--panel-border', theme.panel_border);
-}
-
-listen("theme-changed", (event) => applyTheme(event.payload));
-
-// Load initial theme on startup
-(async () => {
-  try {
-    const settings = await invoke("get_settings");
-    applyTheme(settings.theme);
-  } catch (err) {
-    console.error("Failed to load theme:", err);
-  }
-})();
-
 // ── DOM References ──────────────────────────────────────────
 
-const input   = document.getElementById("search-input");
+const input = document.getElementById("search-input");
 const results = document.getElementById("results");
+const refreshModal = document.getElementById("refresh-modal");
 
 // ── State ───────────────────────────────────────────────────
 
-let entries       = [];   // Current result set
-let selectedIndex = 0;    // Active selection index
-let isExploring   = false; // True when in directory browse mode
-let currentMode   = "standard"; // standard, clipboard
-let searchTimer   = null;
-let requestSeq    = 0;
-
-// ── SVG Icon Library (Feather-style, inline) ────────────────
-
-const ICONS = {
-  app:      `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>`,
-  file:     `<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`,
-  folder:   `<svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
-  system:   `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`,
-  web:      `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`,
-  math:     `<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
-  workflow: `<svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`,
-  clipboard: `<svg viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>`,
-};
-
-// ── Utility: Get icon SVG by EntryKind ──────────────────────
+let entries = [];          // Current result set
+let selectedIndex = 0;     // Active selection index
+let isExploring = false;   // True while in directory browse mode
+let currentMode = "standard"; // standard | clipboard
+let searchTimer = null;
+let requestSeq = 0;        // Guards against out-of-order async responses
 
 const iconCache = new Map();
 const pendingIcons = new Set();
 
+// ── Theme Syncing ───────────────────────────────────────────
+
+listen("theme-changed", (event) => applyTheme(event.payload));
+
+(async () => {
+  try {
+    const settings = await invoke("get_settings");
+    applyTheme(settings.theme);
+  } catch (_) {
+    // Keep the CSS defaults if settings can't be loaded yet.
+  }
+})();
+
+// ── Real App Icons ──────────────────────────────────────────
+
 async function loadRealIcon(path, container) {
   if (iconCache.has(path)) {
-    container.innerHTML = `<img src="${iconCache.get(path)}" style="width:24px;height:24px; border-radius: 4px; object-fit: contain;">`;
+    container.innerHTML = `<img src="${iconCache.get(path)}" alt="">`;
     return;
   }
-
   if (pendingIcons.has(path)) return;
   pendingIcons.add(path);
 
@@ -79,26 +58,14 @@ async function loadRealIcon(path, container) {
     if (b64) {
       iconCache.set(path, b64);
       if (container.isConnected) {
-        container.innerHTML = `<img src="${b64}" style="width:24px;height:24px; border-radius: 4px; object-fit: contain;">`;
+        container.innerHTML = `<img src="${b64}" alt="">`;
       }
     }
-  } catch (e) {
-    // Keep default SVG icon
+  } catch (_) {
+    // Keep the default SVG icon.
   } finally {
     pendingIcons.delete(path);
   }
-}
-
-function getIcon(kind) {
-  const map = { 0: "app", 1: "file", 2: "folder", 3: "system", 4: "web", 5: "math", 6: "workflow", 7: "clipboard" };
-  return ICONS[map[kind]] || ICONS.file;
-}
-
-// ── Utility: Get human-readable type label ──────────────────
-
-function getTypeLabel(kind) {
-  const labels = { 0: "Application", 1: "File", 2: "Folder", 3: "System", 4: "Web Search", 5: "Calculator", 6: "Workflow", 7: "Clipboard" };
-  return labels[kind] || "Item";
 }
 
 // ── Math Evaluation (client-side, zero cost) ────────────────
@@ -138,15 +105,14 @@ function webSearchEntry(query, isExplicit) {
 }
 
 // ── Core: Perform Search ────────────────────────────────────
-// Called on every input event (real-time as-you-type).
+// Debounced on every keystroke. Each scheduled search gets a
+// sequence id so stale responses are discarded.
 
 function scheduleSearch() {
   if (searchTimer) clearTimeout(searchTimer);
   const delay = input.value.trim().length <= 1 ? 0 : 55;
   const reqId = ++requestSeq;
-  searchTimer = setTimeout(() => {
-    performSearch(reqId);
-  }, delay);
+  searchTimer = setTimeout(() => performSearch(reqId), delay);
 }
 
 async function performSearch(reqId = ++requestSeq) {
@@ -167,23 +133,23 @@ async function performSearch(reqId = ++requestSeq) {
       return;
     }
 
-    // Standard-only features: Math and Explicit Web Search
-    // Math and Explicit Web Search
+    // Client-side math
     const math = evaluateMath(query);
     if (math) extra.push(math);
 
+    // Explicit web search (prefix: "g " or "? ")
     if (query.startsWith("g ") || query.startsWith("? ")) {
       const ws = webSearchEntry(query, true);
       if (ws) extra.push(ws);
     }
 
-    // Backend fuzzy search
+    // Backend fuzzy search + plugins
     const backend = await invoke("search", { query, mode: currentMode });
     if (reqId !== requestSeq) return;
 
     entries = [...extra, ...backend];
-    
-    // Fallback: offer Google search
+
+    // Fallback: if nothing found, offer a Google search
     if (entries.length === 0 && query.trim().length > 0) {
       const ws = webSearchEntry(query, false);
       if (ws) entries.push(ws);
@@ -223,9 +189,9 @@ function renderResults() {
     const iconContainer = document.createElement("div");
     iconContainer.className = "item-icon";
     iconContainer.innerHTML = getIcon(entry.kind);
-    
-    // Try to load real app icon if it's an app
-    if (entry.kind === 0 && entry.path) {
+
+    // Load real app icons for apps, files, and system entries
+    if ((entry.kind === 0 || entry.kind === 1 || entry.kind === 3) && entry.path) {
       loadRealIcon(entry.path, iconContainer);
     }
 
@@ -236,10 +202,9 @@ function renderResults() {
       <div class="item-sub">${escapeHtml(sub)}</div>
     `;
 
-    li.innerHTML = "";
     li.appendChild(iconContainer);
     li.appendChild(textContainer);
-    
+
     if (badge) {
       const badgeSpan = document.createElement("span");
       badgeSpan.className = "item-badge";
@@ -258,14 +223,6 @@ function renderResults() {
   // Scroll active item into view
   const active = results.querySelector(".active");
   if (active) active.scrollIntoView({ block: "nearest", behavior: "smooth" });
-}
-
-// ── Utility: Escape HTML to prevent injection ───────────────
-
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 // ── Core: Launch Entry ──────────────────────────────────────
@@ -318,19 +275,39 @@ function handleTab() {
   }
 }
 
+// ── Data Refresh (factory reset) ────────────────────────────
+
+function checkRefresh(query) {
+  const keywords = ["refresh jor", "reset jor", "factory reset"];
+  if (keywords.some((k) => query.toLowerCase() === k)) {
+    refreshModal.style.display = "flex";
+  }
+}
+
+function closeRefresh() {
+  refreshModal.style.display = "none";
+  input.value = "";
+}
+
+async function handleRefresh() {
+  await invoke("refresh_jor_data");
+}
+
+// Expose for inline onclick handlers in index.html
+window.closeRefresh = closeRefresh;
+window.handleRefresh = handleRefresh;
+
 // ── Event Listeners ─────────────────────────────────────────
 
 window.addEventListener("DOMContentLoaded", async () => {
   const win = getCurrentWindow();
 
-  // Listen for mode switches from Rust
+  // Mode switches come from the Rust side (launcher vs clipboard focus).
   await listen("switch-mode", (event) => {
     currentMode = event.payload;
-    if (currentMode === "clipboard") {
-      input.placeholder = "Search Clipboard...";
-    } else {
-      input.placeholder = "Search apps, files, and more...";
-    }
+    input.placeholder = currentMode === "clipboard"
+      ? "Search Clipboard..."
+      : "Search apps, files, and more...";
     input.value = "";
     performSearch(++requestSeq);
   });
@@ -342,17 +319,24 @@ window.addEventListener("DOMContentLoaded", async () => {
       isExploring = false;
       performSearch(++requestSeq);
       setTimeout(() => input.focus(), 10);
-    } else {
-      // Fallback: hide if we lose focus
-      invoke("hide_window");
     }
   });
 
   // Real-time search on every keystroke
-  input.addEventListener("input", scheduleSearch);
+  input.addEventListener("input", () => {
+    selectedIndex = 0;
+    checkRefresh(input.value);
+    scheduleSearch();
+  });
 
   // Keyboard navigation
-  window.addEventListener("keydown", async (e) => {
+  window.addEventListener("keydown", (e) => {
+    // Prevent the Windows system menu from Alt+Space while JOR is focused
+    if (e.altKey && e.code === "Space") {
+      e.preventDefault();
+      return;
+    }
+
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();

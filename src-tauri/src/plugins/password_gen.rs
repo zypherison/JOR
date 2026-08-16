@@ -27,7 +27,7 @@ impl Plugin for PasswordGenPlugin {
                 Entry {
                     name: format!("Generate: {}", pass),
                     name_lower: "password".to_string(),
-                    path: format!("copy:{}", pass),
+                    path: format!("password_gen:copy:{}", pass),
                     subtitle: "Password • 16 chars (Alphanumeric) • Click to copy".to_string(),
                     kind: EntryKind::Plugin,
                     score: 100,

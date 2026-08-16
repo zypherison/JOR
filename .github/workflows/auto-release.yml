@@ -1,0 +1,138 @@
+name: "Auto Release JOR"
+
+# Builds the Windows installer on every push to `main` and publishes a
+# BRAND-NEW GitHub release each time. The version is derived from the
+# highest existing vX.Y.Z release tag and bumped by one patch number, so
+# previously published releases are never overwritten.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      # ── Checkout ─────────────────────────────────────────
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history needed for tag detection + changelog
+
+      # ── Compute next version from the latest release ─────
+      - name: Compute next version
+        id: version
+        shell: pwsh
+        run: |
+          $releases = gh release list --limit 100 --json tagName | ConvertFrom-Json
+          $versions = @($releases | ForEach-Object { $_.tagName } | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } | ForEach-Object {
+            if ($_ -match '^v(\d+)\.(\d+)\.(\d+)$') {
+              [pscustomobject]@{ Tag = $_; Major = [int]$matches[1]; Minor = [int]$matches[2]; Patch = [int]$matches[3] }
+            }
+          })
+
+          if ($versions.Count -gt 0) {
+            $latest = $versions | Sort-Object Major, Minor, Patch -Descending | Select-Object -First 1
+            $major = $latest.Major
+            $minor = $latest.Minor
+            $patch = $latest.Patch + 1
+            $lastTag = $latest.Tag
+          } else {
+            $major = 1
+            $minor = 0
+            $patch = 0
+            $lastTag = ""
+          }
+
+          # Guard against tag collisions (e.g. a deleted release re-pushed)
+          $next = "v$major.$minor.$patch"
+          while ($true) {
+            gh release view $next --json tagName 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { break }
+            $patch++
+            $next = "v$major.$minor.$patch"
+          }
+
+          echo "VERSION=$next" >> $env:GITHUB_OUTPUT
+          echo "VERSION_NUM=$major.$minor.$patch" >> $env:GITHUB_OUTPUT
+          echo "LAST_TAG=$lastTag" >> $env:GITHUB_OUTPUT
+
+      # ── Build a changelog from commits since the last tag ─
+      - name: Build changelog
+        id: changelog
+        shell: pwsh
+        run: |
+          $lastTag = "${{ steps.version.outputs.LAST_TAG }}"
+          if ($lastTag) {
+            $log = git log --oneline "$lastTag..HEAD" 2>$null
+          } else {
+            $log = git log --oneline -20
+          }
+          if (-not $log) { $log = @("Initial release") }
+          $body = "## What's Changed`n`n" + ($log -join "`n")
+          $body | Out-File -FilePath changelog.txt -Encoding utf8
+
+      - name: Prepare release body
+        id: body
+        shell: bash
+        run: |
+          { echo 'releaseBody<<EOF'; cat changelog.txt; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+
+      # ── Sync version into project files ──────────────────
+      - name: Sync version into project files
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.VERSION_NUM }}"
+
+          # Update tauri.conf.json
+          $tauri = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $tauri.version = $ver
+          $tauri | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+
+          # Update package.json
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $pkg.version = $ver
+          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
+
+          # Update ONLY the [package] version in Cargo.toml (not dependency versions)
+          $lines = Get-Content src-tauri/Cargo.toml
+          $inPackage = $false
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^\[package\]') { $inPackage = $true }
+            elseif ($lines[$i] -match '^\[') { $inPackage = $false }
+
+            if ($inPackage -and $lines[$i] -match '^version\s*=') {
+              $lines[$i] = "version = `"$ver`""
+              break
+            }
+          }
+          $lines | Set-Content src-tauri/Cargo.toml
+
+      # ── Setup toolchains ─────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Build with Tauri + publish a NEW release ─────────
+      - name: Build & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ steps.version.outputs.VERSION }}
+          releaseName: "JOR ${{ steps.version.outputs.VERSION }}"
+          releaseBody: ${{ steps.body.outputs.releaseBody }}
+          releaseDraft: false
+          prerelease: false

@@ -25,6 +25,9 @@ impl Default for ThemeConfig {
     }
 }
 
+/// Features are gated by the `enabled_plugins` list rather than by any
+/// license flag. "hotkeys" is a virtual feature that controls custom
+/// application shortcuts.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Settings {
     pub theme: ThemeConfig,
@@ -33,23 +36,22 @@ pub struct Settings {
     pub clip_hotkey: String,
     pub custom_hotkeys: HashMap<String, String>,
     pub terms_accepted: bool,
-    #[serde(default)]
-    pub license_key: Option<String>,
-    #[serde(default)]
-    pub is_premium: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: ThemeConfig::default(),
-            enabled_plugins: vec!["clipboard".into(), "converter".into(), "window_manager".into()],
+            enabled_plugins: vec![
+                "clipboard".into(),
+                "converter".into(),
+                "window_manager".into(),
+                "hotkeys".into(),
+            ],
             main_hotkey: "Alt+Space".into(),
             clip_hotkey: "Alt+V".into(),
             custom_hotkeys: HashMap::new(),
             terms_accepted: false,
-            license_key: None,
-            is_premium: false,
         }
     }
 }

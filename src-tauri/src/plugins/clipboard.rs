@@ -104,7 +104,7 @@ impl Plugin for ClipboardPlugin {
                         name_lower: entry.content.to_lowercase(),
                         path: format!("clipboard:{}", entry.id),
                         subtitle: format!("Clipboard • {}", entry.timestamp),
-                        kind: EntryKind::Plugin,
+                        kind: EntryKind::Clipboard,
                         score: 90,
                         search_score: score,
                     });

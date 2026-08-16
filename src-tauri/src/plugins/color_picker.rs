@@ -19,7 +19,7 @@ impl Plugin for ColorPickerPlugin {
                 Entry {
                     name: "Pick Color from Screen".to_string(),
                     name_lower: "color".to_string(),
-                    path: "action:pick".to_string(),
+                    path: "color_picker:action:pick".to_string(),
                     subtitle: "Color Picker • Sample any pixel on your display".to_string(),
                     kind: EntryKind::Plugin,
                     score: 100,
@@ -28,7 +28,7 @@ impl Plugin for ColorPickerPlugin {
                 Entry {
                     name: "Convert #8b5cf6 to RGB".to_string(),
                     name_lower: "color".to_string(),
-                    path: "copy:rgb(139, 92, 246)".to_string(),
+                    path: "color_picker:copy:rgb(139, 92, 246)".to_string(),
                     subtitle: "Color Picker • Quick conversion (Example)".to_string(),
                     kind: EntryKind::Plugin,
                     score: 80,

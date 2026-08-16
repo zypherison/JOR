@@ -43,8 +43,13 @@ impl ClipboardDatabase {
     }
 
     pub fn search(&self, query: &str) -> Result<Vec<ClipboardEntry>> {
-        let mut stmt = self.conn.prepare("SELECT id, content, timestamp FROM clipboard_history WHERE content LIKE ? ORDER BY id DESC LIMIT 50")?;
-        let rows = stmt.query_map(params![format!("%{}%", query)], |row| {
+        // Escape LIKE wildcards so user input is matched literally.
+        let escaped = query.replace('%', "\\%").replace('_', "\\_");
+        let mut stmt = self.conn.prepare(
+            "SELECT id, content, timestamp FROM clipboard_history \
+             WHERE content LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT 50",
+        )?;
+        let rows = stmt.query_map(params![format!("%{}%", escaped)], |row| {
             Ok(ClipboardEntry {
                 id: row.get(0)?,
                 content: row.get(1)?,

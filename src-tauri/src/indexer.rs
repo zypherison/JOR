@@ -47,11 +47,12 @@ impl Indexer {
             let fresh = Self::perform_full_index(&extra_paths);
             let _ = Self::save_index(&fresh, &cache_path);
             
-            // Update the running state
+            // Update the running state, preserving workflow entries — they are
+            // injected separately by main.rs and are not part of the file index.
             if let Some(state) = ah.try_state::<crate::AppState>() {
                 if let Ok(mut entries) = state.entries.lock() {
-                    *entries = fresh;
-                    println!("Index refreshed backgroundly with {} items", entries.len());
+                    entries.retain(|e| e.kind == EntryKind::Workflow);
+                    entries.extend(fresh);
                 }
             }
         });
@@ -207,7 +208,6 @@ impl Indexer {
     }
 
     /// Deserialize a cached index from disk.
-    #[allow(dead_code)]
     pub fn load_index(path: &Path) -> std::io::Result<Vec<Entry>> {
         let mut file = fs::File::open(path)?;
         let mut buffer = Vec::new();

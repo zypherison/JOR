@@ -1,10 +1,11 @@
 name: "Release JOR"
 
+# Manual-only stable release pipeline: publishes the fixed v1.0.0 release and
+# refreshes the winget manifest hash. It is intentionally NOT triggered on
+# push — automatic per-push builds with fresh version numbers are handled by
+# the `auto-release` workflow, which never overwrites existing releases.
 on:
-  push:
-    branches:
-      - main
-      - master
+  workflow_dispatch:
 
 permissions:
   contents: write

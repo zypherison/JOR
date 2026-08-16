@@ -218,7 +218,23 @@ body {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  overflow: hidden;
   transition: all 0.2s;
+}
+
+.item-icon svg {
+  width: 24px;
+  height: 24px;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.item-icon img {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  object-fit: contain;
 }
 
 .item.active .item-icon {

@@ -9,6 +9,8 @@
 //   indexer.rs    — Filesystem crawler & index builder
 //   search.rs     — Fuzzy search with smart ranking
 //   config.rs     — User configuration persistence
+//   plugins/      — Modular search/action plugins
+//   settings.rs   — User settings persistence
 // ─────────────────────────────────────────────────────────────
 
 // Prevents console window on Windows in release builds
@@ -24,26 +26,66 @@ mod settings;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::collections::HashSet;
+use std::os::windows::ffi::OsStrExt;
 use crate::plugins::Plugin;
 use indexer::Indexer;
 use models::{Config, Entry, EntryKind, Workflow};
 use search::SearchEngine;
 use settings::Settings;
-use tauri::{AppHandle, Manager, Wry, State, Window, Emitter};
+use tauri::{AppHandle, Emitter, Manager, State, Window, Wry};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 use walkdir::WalkDir;
 
+use base64::{Engine as _, engine::general_purpose};
+use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Gdi::{
+    GetDC, ReleaseDC, GetDIBits, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
+    CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, DeleteDC, DeleteObject,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V, VK_MENU, VK_SHIFT,
+};
+use windows::Win32::UI::Shell::ExtractIconExW;
+use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, HICON, GetIconInfo, ICONINFO};
+
 const MAX_BROWSE_DEPTH: usize = 8;
 const MAX_BROWSE_RESULTS: usize = 1200;
+
+/// Extra system utilities surfaced in the settings app-picker.
+const SYSTEM_UTILITIES: [(&str, &str, &str); 17] = [
+    ("Wi-Fi Settings", "ms-settings:network-wifi", "System Settings"),
+    ("Bluetooth Settings", "ms-settings:bluetooth", "System Settings"),
+    ("Display Settings", "ms-settings:display", "System Settings"),
+    ("Sound Settings", "ms-settings:mmsys", "System Settings"),
+    ("Windows Update", "ms-settings:windowsupdate", "System Settings"),
+    ("Battery Settings", "ms-settings:batterysaver", "System Settings"),
+    ("Personalization", "ms-settings:personalization", "System Settings"),
+    ("Add or Remove Programs", "ms-settings:appsfeatures", "System Settings"),
+    ("Date & Time", "ms-settings:dateandtime", "System Settings"),
+    ("Privacy Settings", "ms-settings:privacy", "System Settings"),
+    ("Search Settings", "ms-settings:search", "System Settings"),
+    ("Task Manager", "taskmgr", "System Utility"),
+    ("Control Panel", "control", "System Utility"),
+    ("Registry Editor", "regedit", "System Utility"),
+    ("Services", "services.msc", "System Utility"),
+    ("Command Prompt", "cmd", "System Utility"),
+    ("PowerShell", "powershell", "System Utility"),
+];
 
 // ── Application State ───────────────────────────────────────
 
 pub struct AppState {
+    /// The full searchable index (apps + files + workflows + system actions).
     pub entries: Arc<Mutex<Vec<Entry>>>,
+    /// The search engine instance with smart ranking.
     pub engine: Arc<SearchEngine>,
+    /// Timestamp of the last window show — used to debounce
+    /// the focus-loss auto-hide (prevents flicker on summon).
     pub last_show_time: Arc<Mutex<Instant>>,
+    /// Registered search/action plugins.
     pub plugins: Vec<Box<dyn Plugin + Send + Sync>>,
+    /// Current user settings (theme, hotkeys, license).
     pub settings: Arc<Mutex<Settings>>,
 }
 
@@ -67,21 +109,22 @@ async fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
 async fn update_settings(new_settings: Settings, app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     // Save to disk
     settings::save_settings(&app, &new_settings)?;
-    
+
     // Update state
     {
         let mut s = state.settings.lock().unwrap();
         *s = new_settings.clone();
     }
-    
+
     // Apply changes (hotkeys, etc.)
     apply_settings(&app, &new_settings).await?;
-    
+
     Ok(())
 }
 
 #[tauri::command]
 async fn get_plugins(state: State<'_, AppState>) -> Result<Vec<PluginInfo>, String> {
+    let enabled: Vec<String> = state.settings.lock().unwrap().enabled_plugins.clone();
     let mut infos = Vec::new();
     for plugin in &state.plugins {
         infos.push(PluginInfo {
@@ -89,17 +132,17 @@ async fn get_plugins(state: State<'_, AppState>) -> Result<Vec<PluginInfo>, Stri
             name: plugin.name().to_string(),
             description: plugin.description().to_string(),
             is_pro: plugin.is_pro(),
-            enabled: true,
+            enabled: enabled.iter().any(|id| id == plugin.id()),
         });
     }
-    
+
     // Virtual "Plugins" for UI representation
     infos.push(PluginInfo {
         id: "hotkeys".to_string(),
         name: "Global Hotkeys".to_string(),
         description: "Register custom shortcuts for apps, folders, and workflows.".to_string(),
-        is_pro: true,
-        enabled: true,
+        is_pro: false,
+        enabled: enabled.iter().any(|id| id == "hotkeys"),
     });
 
     Ok(infos)
@@ -119,8 +162,8 @@ async fn apply_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(
         });
     }
 
-    // [PREMIUM ONLY] Register Clip JOR
-    if settings.is_premium {
+    // Register the clipboard window hotkey only while the clipboard plugin is enabled.
+    if settings.enabled_plugins.iter().any(|p| p == "clipboard") {
         if let Ok(s) = settings.clip_hotkey.parse::<Shortcut>() {
             let _ = shortcut_plugin.on_shortcut(s, |app, _, event| {
                 if event.state() == ShortcutState::Pressed {
@@ -130,8 +173,8 @@ async fn apply_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(
         }
     }
 
-    // [PREMIUM ONLY] Register Custom Hotkeys
-    if settings.is_premium {
+    // Register custom app hotkeys only while the "hotkeys" feature is enabled.
+    if settings.enabled_plugins.iter().any(|p| p == "hotkeys") {
         for (hk, path) in &settings.custom_hotkeys {
             if let Ok(s) = hk.parse::<Shortcut>() {
                 let p = path.clone();
@@ -148,7 +191,7 @@ async fn apply_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(
                                     }
                                 }
                             }
-                            
+
                             if let Some(entry) = matched_entry {
                                 let _ = launch(entry, app_clone).await;
                             } else {
@@ -168,50 +211,17 @@ async fn apply_settings(app: &tauri::AppHandle, settings: &Settings) -> Result<(
 }
 
 #[tauri::command]
-async fn activate_license(key: String, app: tauri::AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
-    // 1. Validation Logic (MOCK)
-    let is_valid = key.starts_with("JOR-PRO-");
-
-    if is_valid {
-        let settings = {
-            let mut s = state.settings.lock().map_err(|e| e.to_string())?;
-            s.license_key = Some(key);
-            s.is_premium = true;
-            settings::save_settings(&app, &s)?;
-            s.clone()
-        };
-        
-        apply_settings(&app, &settings).await?;
-        Ok(true)
-    } else {
-        Err("Invalid License Key. Please check your purchase receipt.".into())
-    }
-}
-
-#[tauri::command]
 async fn clear_clipboard_history(state: State<'_, AppState>) -> Result<(), String> {
     for plugin in &state.plugins {
         if plugin.id() == "clipboard" {
-            // We need to execute a special action to clear
             return plugin.execute("clear_all").await;
         }
     }
     Err("Clipboard plugin not found".into())
 }
 
-use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, HICON, GetIconInfo, ICONINFO};
-use windows::Win32::UI::Shell::ExtractIconExW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V, VK_MENU, VK_SHIFT
-};
-use windows::Win32::Graphics::Gdi::{
-    GetDC, ReleaseDC, GetDIBits, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
-    CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, DeleteDC, DeleteObject
-};
-use windows::Win32::Foundation::HWND;
-use std::os::windows::ffi::OsStrExt;
-use base64::{Engine as _, engine::general_purpose};
-
+/// Extracts the embedded 32x32 icon from an .exe/.lnk and returns it as a
+/// base64-encoded BMP data URL for the frontend.
 #[tauri::command]
 async fn get_app_icon(path: String) -> Result<String, String> {
     let mut path_wide: Vec<u16> = std::path::Path::new(&path).as_os_str().encode_wide().collect();
@@ -224,7 +234,7 @@ async fn get_app_icon(path: String) -> Result<String, String> {
             0,
             Some(large_icon.as_mut_ptr()),
             None,
-            1
+            1,
         );
 
         if large_icon[0].is_invalid() {
@@ -240,12 +250,19 @@ async fn get_app_icon(path: String) -> Result<String, String> {
         let hbm_mem = CreateCompatibleBitmap(hdc_screen, 32, 32);
         let hold_bm = SelectObject(hdc_mem, hbm_mem);
 
-        // Fill background with transparency/specific color if needed, 
-        // but DI_NORMAL handles most transparency cases into the bitmap.
+        // DI_NORMAL preserves transparency into the target bitmap.
         windows::Win32::UI::WindowsAndMessaging::DrawIconEx(
-            hdc_mem, 0, 0, hicon, 32, 32, 0, None,
-            windows::Win32::UI::WindowsAndMessaging::DI_NORMAL
-        ).map_err(|e| e.to_string())?;
+            hdc_mem,
+            0,
+            0,
+            hicon,
+            32,
+            32,
+            0,
+            None,
+            windows::Win32::UI::WindowsAndMessaging::DI_NORMAL,
+        )
+        .map_err(|e| e.to_string())?;
 
         let mut bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -290,7 +307,7 @@ async fn get_app_icon(path: String) -> Result<String, String> {
             0x00, 0x00, 0x00, 0x00, // Colors used
             0x00, 0x00, 0x00, 0x00, // Important colors
         ];
-        
+
         // GDI buffer is already BGRA, which BMP expects.
         bmp_file.extend(buffer);
         let b64 = general_purpose::STANDARD.encode(bmp_file);
@@ -303,7 +320,7 @@ async fn accept_terms(state: State<'_, AppState>, app: tauri::AppHandle) -> Resu
     let mut s = state.settings.lock().unwrap();
     s.terms_accepted = true;
     settings::save_settings(&app, &s)?;
-    
+
     if let Some(w) = app.get_webview_window("tos") {
         w.hide().ok();
     }
@@ -316,7 +333,10 @@ async fn accept_terms(state: State<'_, AppState>, app: tauri::AppHandle) -> Resu
 #[tauri::command]
 async fn search(query: String, mode: String, state: State<'_, AppState>) -> Result<Vec<Entry>, String> {
     if mode == "clipboard" {
-        // STRICT: Only clipboard results
+        // STRICT: Only clipboard results (and only when the plugin is enabled)
+        if !state.settings.lock().unwrap().enabled_plugins.iter().any(|id| id == "clipboard") {
+            return Ok(vec![]);
+        }
         let mut results = Vec::new();
         for plugin in &state.plugins {
             if plugin.id() == "clipboard" {
@@ -326,18 +346,20 @@ async fn search(query: String, mode: String, state: State<'_, AppState>) -> Resu
         return Ok(results);
     }
 
-    // Standard mode: Search engine (Apps/Files) + Non-clipboard plugins
+    // Standard mode: Search engine (Apps/Files) + enabled plugins
     let mut results = {
         let entries = state.entries.lock().unwrap();
         state.engine.search(&query, &entries)
     };
 
-    // Query relevant plugins in PARALLEL for maximum performance
+    let enabled: Vec<String> = state.settings.lock().unwrap().enabled_plugins.clone();
+
+    // Query enabled plugins in PARALLEL for maximum performance
     let plugin_futures: Vec<_> = state.plugins.iter()
-        .filter(|p| p.id() != "clipboard")
+        .filter(|p| enabled.iter().any(|id| id == p.id()))
         .map(|p| p.search(&query, &mode))
         .collect();
-    
+
     let all_plugin_results = futures::future::join_all(plugin_futures).await;
     for pr in all_plugin_results {
         results.extend(pr);
@@ -345,7 +367,7 @@ async fn search(query: String, mode: String, state: State<'_, AppState>) -> Resu
 
     // Sort again to ensure plugin results are prioritized by score
     results.sort_by(|a, b| b.search_score.cmp(&a.search_score));
-    
+
     // Final limit to 50 results for performance
     results.truncate(50);
 
@@ -381,9 +403,9 @@ async fn launch(entry: Entry, app: AppHandle) -> Result<(), String> {
             let allowed_system_cmds = [
                 "rundll32.exe powrprof.dll,SetSuspendState 0,1,0",
                 "shutdown /s /t 0",
-                "shutdown /r /t 0"
+                "shutdown /r /t 0",
             ];
-            
+
             if allowed_system_cmds.contains(&entry.path.as_str()) {
                 std::process::Command::new("cmd")
                     .args(["/C", &entry.path])
@@ -399,35 +421,29 @@ async fn launch(entry: Entry, app: AppHandle) -> Result<(), String> {
                 for plugin in &state.plugins {
                     if plugin.id() == plugin_id {
                         plugin.execute(action_id).await.map_err(|e| e.to_string())?;
-                        
-                        // If the plugin action was a "copy" or "snippet" action, simulate paste for a seamless experience
-                        if plugin_id == "clipboard" || plugin_id == "snippets" || action_id.starts_with("copy:") {
-                            std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_millis(300));
-                                unsafe {
-                                    let mut inputs = [INPUT::default(); 6];
-                                    inputs[0].r#type = INPUT_KEYBOARD;
-                                    inputs[0].Anonymous.ki = KEYBDINPUT { wVk: VK_MENU, dwFlags: KEYEVENTF_KEYUP, ..Default::default() };
-                                    inputs[1].r#type = INPUT_KEYBOARD;
-                                    inputs[1].Anonymous.ki = KEYBDINPUT { wVk: VK_SHIFT, dwFlags: KEYEVENTF_KEYUP, ..Default::default() };
-                                    inputs[2].r#type = INPUT_KEYBOARD;
-                                    inputs[2].Anonymous.ki = KEYBDINPUT { wVk: VK_CONTROL, ..Default::default() };
-                                    inputs[3].r#type = INPUT_KEYBOARD;
-                                    inputs[3].Anonymous.ki = KEYBDINPUT { wVk: VK_V, ..Default::default() };
-                                    inputs[4].r#type = INPUT_KEYBOARD;
-                                    inputs[4].Anonymous.ki = KEYBDINPUT { wVk: VK_V, dwFlags: KEYEVENTF_KEYUP, ..Default::default() };
-                                    inputs[5].r#type = INPUT_KEYBOARD;
-                                    inputs[5].Anonymous.ki = KEYBDINPUT { wVk: VK_CONTROL, dwFlags: KEYEVENTF_KEYUP, ..Default::default() };
-                                    SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
-                                }
-                            });
+
+                        // Copy-type actions simulate a paste for a seamless experience.
+                        if plugin_id == "snippets" || action_id.starts_with("copy:") {
+                            simulate_paste();
                         }
-                        
                         return Ok(());
                     }
                 }
             }
             Err("Plugin not found".into())
+        }
+        EntryKind::Clipboard => {
+            // Clipboard entries (path: "clipboard:<id>") always re-copy then paste.
+            if let Some((plugin_id, action_id)) = entry.path.split_once(':') {
+                for plugin in &state.plugins {
+                    if plugin.id() == plugin_id {
+                        plugin.execute(action_id).await.map_err(|e| e.to_string())?;
+                        simulate_paste();
+                        return Ok(());
+                    }
+                }
+            }
+            Err("Clipboard entry could not be resolved".into())
         }
         _ => {
             app.opener()
@@ -435,6 +451,31 @@ async fn launch(entry: Entry, app: AppHandle) -> Result<(), String> {
                 .map_err(|e| e.to_string())
         }
     }
+}
+
+/// Simulates Ctrl+V after a clipboard/snippet action so the copied value is
+/// pasted directly into the previously-focused app. Runs off-thread with a
+/// short delay so the launcher window hides cleanly first.
+fn simulate_paste() {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        unsafe {
+            let mut inputs = [INPUT::default(); 6];
+            inputs[0].r#type = INPUT_KEYBOARD;
+            inputs[0].Anonymous.ki = KEYBDINPUT { wVk: VK_MENU, dwFlags: KEYEVENTF_KEYUP, ..Default::default() };
+            inputs[1].r#type = INPUT_KEYBOARD;
+            inputs[1].Anonymous.ki = KEYBDINPUT { wVk: VK_SHIFT, dwFlags: KEYEVENTF_KEYUP, ..Default::default() };
+            inputs[2].r#type = INPUT_KEYBOARD;
+            inputs[2].Anonymous.ki = KEYBDINPUT { wVk: VK_CONTROL, ..Default::default() };
+            inputs[3].r#type = INPUT_KEYBOARD;
+            inputs[3].Anonymous.ki = KEYBDINPUT { wVk: VK_V, ..Default::default() };
+            inputs[4].r#type = INPUT_KEYBOARD;
+            inputs[4].Anonymous.ki = KEYBDINPUT { wVk: VK_V, dwFlags: KEYEVENTF_KEYUP, ..Default::default() };
+            inputs[5].r#type = INPUT_KEYBOARD;
+            inputs[5].Anonymous.ki = KEYBDINPUT { wVk: VK_CONTROL, dwFlags: KEYEVENTF_KEYUP, ..Default::default() };
+            SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        }
+    });
 }
 
 #[tauri::command]
@@ -544,6 +585,10 @@ fn sync_workflow_entries(app: &AppHandle) {
     };
 }
 
+// ── Window Management ───────────────────────────────────────
+
+/// Toggle the launcher window visibility.
+/// On show: records timestamp for debouncing.
 fn toggle_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
@@ -579,29 +624,10 @@ async fn get_executable_list(state: State<'_, AppState>) -> Result<Vec<Entry>, S
         .filter(|e| e.kind == EntryKind::App || e.kind == EntryKind::System)
         .cloned()
         .collect();
-        
-    // Add common system settings
-    let settings = [
-        ("Wi-Fi Settings", "ms-settings:network-wifi", "System Settings"),
-        ("Bluetooth Settings", "ms-settings:bluetooth", "System Settings"),
-        ("Display Settings", "ms-settings:display", "System Settings"),
-        ("Sound Settings", "ms-settings:mmsys", "System Settings"),
-        ("Windows Update", "ms-settings:windowsupdate", "System Settings"),
-        ("Battery Settings", "ms-settings:batterysaver", "System Settings"),
-        ("Personalization", "ms-settings:personalization", "System Settings"),
-        ("Add or Remove Programs", "ms-settings:appsfeatures", "System Settings"),
-        ("Date & Time", "ms-settings:dateandtime", "System Settings"),
-        ("Privacy Settings", "ms-settings:privacy", "System Settings"),
-        ("Search Settings", "ms-settings:search", "System Settings"),
-        ("Task Manager", "taskmgr", "System Utility"),
-                        ("Control Panel", "control", "System Utility"),
-                        ("Registry Editor", "regedit", "System Utility"),
-                        ("Services", "services.msc", "System Utility"),
-                        ("Command Prompt", "cmd", "System Utility"),
-                        ("PowerShell", "powershell", "System Utility"),
-                    ];
+    drop(entries);
 
-    for (name, path, sub) in settings {
+    // Add common system settings
+    for (name, path, sub) in SYSTEM_UTILITIES {
         apps.push(Entry {
             name: name.to_string(),
             name_lower: name.to_lowercase(),
@@ -617,54 +643,6 @@ async fn get_executable_list(state: State<'_, AppState>) -> Result<Vec<Entry>, S
     Ok(apps)
 }
 
-fn setup_analytics(app_handle: &tauri::AppHandle) {
-    let app_dir = app_handle.path().app_data_dir().unwrap_or_default();
-    let lock_file = app_dir.join(".analytics_done");
-
-    if !lock_file.exists() {
-        let _ = std::fs::create_dir_all(&app_dir);
-        let _handle = app_handle.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(5));
-
-            let geo_data: serde_json::Value = match reqwest::blocking::get("https://ipapi.co/json/") {
-                Ok(resp) => resp.json().unwrap_or(serde_json::json!({})),
-                Err(_) => serde_json::json!({}),
-            };
-
-            let country = geo_data["country_name"].as_str().unwrap_or("Unknown");
-            let city = geo_data["city"].as_str().unwrap_or("Unknown");
-
-            // LOCAL TESTING URL
-            let dashboard_url = "http://127.0.0.1:5500/JOR/website.html";
-            let payload = serde_json::json!({
-                "event": "install",
-                "platform": "windows",
-                "location": format!("{}, {}", city, country),
-                "timestamp": chrono::Utc::now().to_rfc3339()
-            });
-
-            let client = reqwest::blocking::Client::new();
-            if let Ok(_) = client.post(dashboard_url).timeout(std::time::Duration::from_secs(5)).json(&payload).send() {
-                let _ = std::fs::File::create(lock_file);
-            }
-        });
-    }
-}
-
-#[tauri::command]
-async fn deactivate_license(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let settings = {
-        let mut s = state.settings.lock().map_err(|e| e.to_string())?;
-        s.license_key = None;
-        s.is_premium = false;
-        settings::save_settings(&app, &s)?;
-        s.clone()
-    };
-    apply_settings(&app, &settings).await?;
-    Ok(())
-}
-
 #[tauri::command]
 async fn refresh_jor_data(app: tauri::AppHandle) -> Result<(), String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -674,16 +652,14 @@ async fn refresh_jor_data(app: tauri::AppHandle) -> Result<(), String> {
     std::process::exit(0);
 }
 
+// ── Entry Point ─────────────────────────────────────────────
+
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--minimized"])))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
-            let app_handle = app.handle().clone();
-            setup_analytics(&app_handle);
-            
             let loaded_config = config::load_or_create_config();
             let mut initial_entries = Indexer::index_all(app.handle(), &loaded_config.extra_paths);
             initial_entries.extend(build_workflow_entries(&loaded_config));
@@ -697,7 +673,7 @@ fn main() {
                 last_show_time: Arc::new(Mutex::new(Instant::now())),
                 plugins: vec![
                     Box::new(plugins::clipboard::ClipboardPlugin::new()),
-                    Box::new(plugins::converter::ConverterPlugin),
+                    Box::new(plugins::converter::ConverterPlugin::new()),
                     Box::new(plugins::window_manager::WindowManagerPlugin),
                     Box::new(plugins::snippets::SnippetsPlugin::new()),
                     Box::new(plugins::sys_info::SystemInfoPlugin::new()),
@@ -705,13 +681,15 @@ fn main() {
                     Box::new(plugins::timer::TimerPlugin),
                     Box::new(plugins::color_picker::ColorPickerPlugin),
                     Box::new(plugins::ip_info::IpPlugin),
-                    Box::new(plugins::weather::WeatherPlugin),
+                    Box::new(plugins::weather::WeatherPlugin::new()),
                 ],
                 settings: Arc::new(Mutex::new(user_settings.clone())),
             };
 
             app.manage(state);
-            
+
+            // Rebuild the index in the background so startup stays instant while
+            // the cached manifest is refreshed with the latest files.
             indexer::Indexer::refresh_index(app.handle(), loaded_config.extra_paths.clone());
 
             let app_handle = app.handle();
@@ -721,14 +699,15 @@ fn main() {
                 if let Some(tos_window) = app.get_webview_window("tos") {
                     tos_window.show().ok();
                 }
-            } else {
-                if let Some(settings_window) = app.get_webview_window("settings") {
-                    settings_window.show().ok();
-                }
+            } else if let Some(settings_window) = app.get_webview_window("settings") {
+                settings_window.show().ok();
             }
 
+            // Only initialize enabled plugins (e.g. the clipboard monitor thread).
             for plugin in &app_state.plugins {
-                plugin.init(app_handle);
+                if user_settings.enabled_plugins.iter().any(|id| id == plugin.id()) {
+                    plugin.init(app_handle);
+                }
             }
 
             let ah = app.handle().clone();
@@ -759,16 +738,15 @@ fn main() {
                 });
             }
 
-            // Tray
+            // System tray
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::TrayIconBuilder;
             let quit = MenuItem::with_id(app, "quit", "Quit JOR", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Open Launcher", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
-            
-            // Try to load the premium logo explicitly
+
             let icon = app.default_window_icon().cloned().unwrap();
-            
+
             let _tray = TrayIconBuilder::<Wry>::new()
                 .icon(icon)
                 .tooltip("JOR — Speed of Thought")
@@ -791,8 +769,6 @@ fn main() {
             list_directory,
             get_settings,
             update_settings,
-            activate_license,
-            deactivate_license,
             refresh_jor_data,
             clear_clipboard_history,
             accept_terms,
