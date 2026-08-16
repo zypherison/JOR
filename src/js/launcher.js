@@ -2,11 +2,11 @@
 // JOR — Launcher Window Controller
 // Real-time search with debounce + stale-response guarding,
 // keyboard navigation, Tab autocomplete, math evaluation, web
-// search, directory browsing, real app icons, and theme sync.
+// search, directory browsing, and real app icons.
 // Pure vanilla JS talking to Tauri via window.__TAURI__.
 // ─────────────────────────────────────────────────────────────
 
-import { getIcon, getTypeLabel, escapeHtml, applyTheme } from "./shared.js";
+import { getIcon, getTypeLabel, escapeHtml } from "./shared.js";
 
 const { invoke } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
@@ -62,19 +62,6 @@ function parentPath(p) {
   return trimmed.slice(0, idx) + pathSep(p);
 }
 
-// ── Theme Syncing ───────────────────────────────────────────
-
-listen("theme-changed", (event) => applyTheme(event.payload));
-
-(async () => {
-  try {
-    const settings = await invoke("get_settings");
-    applyTheme(settings.theme);
-  } catch (_) {
-    // Keep the CSS defaults if settings can't be loaded yet.
-  }
-})();
-
 // ── Real App Icons ──────────────────────────────────────────
 
 async function loadRealIcon(path, container) {
@@ -119,6 +106,19 @@ function evaluateMath(query) {
     } catch (_) {}
   }
   return null;
+}
+
+// ── Start-menu replacement: quick access folders ────────────
+// Shown at the top of an empty query. Clicking one opens the
+// launcher's built-in file browser (explore mode) at that location,
+// so JOR doubles as a lightweight Start menu + file explorer.
+function quickAccessEntries() {
+  return [
+    { name: "Home",        path: "~/",          subtitle: "Browse files", kind: 2, quick: true },
+    { name: "Desktop",     path: "~/Desktop/",  subtitle: "Browse files", kind: 2, quick: true },
+    { name: "Documents",   path: "~/Documents/",subtitle: "Browse files", kind: 2, quick: true },
+    { name: "Downloads",   path: "~/Downloads/",subtitle: "Browse files", kind: 2, quick: true },
+  ];
 }
 
 // ── Web Search (explicit or fallback) ───────────────────────
@@ -179,7 +179,12 @@ async function performSearch(reqId = ++requestSeq) {
     const backend = await invoke("search", { query, mode: currentMode });
     if (reqId !== requestSeq) return;
 
-    entries = [...extra, ...backend];
+    // Empty query → Start-menu view: quick-access folders + most-used apps.
+    if (query.trim() === "") {
+      entries = [...quickAccessEntries(), ...backend];
+    } else {
+      entries = [...extra, ...backend];
+    }
 
     // Fallback: if nothing found, offer a Google search
     if (entries.length === 0 && query.trim().length > 0) {
@@ -270,9 +275,11 @@ async function launchEntry(entry) {
     if (entry.kind === 5) {
       // Math result → copy to clipboard
       await navigator.clipboard.writeText(entry.path);
-    } else if (entry.kind === 2 && isExploring) {
-      // Folder in explore mode → drill down
+    } else if (entry.kind === 2 && (isExploring || entry.quick)) {
+      // Folder → drill down into the built-in file browser
+      // (explore mode; quick-access entries enter it directly)
       input.value = withTrailingSep(entry.path);
+      isExploring = true;
       scheduleSearch();
       return;
     } else {
@@ -341,7 +348,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     currentMode = event.payload;
     input.placeholder = currentMode === "clipboard"
       ? "Search Clipboard..."
-      : "Search apps, files, and more...";
+      : "Search apps, files… or type a path (C:\\, ~/)";
     input.value = "";
     performSearch(++requestSeq);
   });

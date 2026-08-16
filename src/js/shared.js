@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 // JOR — Shared frontend helpers
-// Icons, type labels, HTML escaping, debounce, and theme syncing.
+// Icons, type labels, HTML escaping, debounce, and toasts.
 // Imported as an ES module by the launcher and clipboard windows.
 // ─────────────────────────────────────────────────────────────
 
@@ -47,17 +47,6 @@ export function debounce(fn, delay) {
       fn(...args);
     }, delay);
   };
-}
-
-/** Apply a ThemeConfig object to the CSS custom properties of the page. */
-export function applyTheme(theme) {
-  if (!theme) return;
-  const root = document.documentElement.style;
-  root.setProperty("--bg-top", theme.bg_top);
-  root.setProperty("--bg-mid", theme.bg_mid);
-  root.setProperty("--bg-bottom", theme.bg_bottom);
-  root.setProperty("--accent", theme.accent);
-  root.setProperty("--panel-border", theme.panel_border);
 }
 
 /** Show a transient toast notification (reuses a single shared element). */

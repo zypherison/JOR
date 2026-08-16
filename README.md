@@ -22,7 +22,9 @@ Made for the generation that hates loading screens.
 ## ✨ Features
 
 - **Ultra-Fast Backend**: Indexed parsing with native Rust, a cached manifest for instant startup, and fuzzy matching in single-digit milliseconds.
-- **Glassmorphic UI**: Pure vanilla HTML/CSS/JS inside an optimized WebView2 window — no framework overhead.
+- **Glassmorphic UI**: Pure vanilla HTML/CSS/JS inside an optimized WebView2 window — no framework overhead. One fixed, optimized theme: no runtime theming means no extra IPC or DOM work at startup.
+- **Start Menu & File Explorer Replacement**: An empty search shows quick-access folders (Home, Desktop, Documents, Downloads) plus your most-used apps. Type any path (`C:\`, `~/`, `/`) to browse folders entirely inside JOR with Tab / Enter / Backspace.
+- **Built for Slow Hardware**: Static backgrounds, light blur, debounced search, and full `prefers-reduced-motion` support — no GPU-heavy animation or framework tax.
 - **Plugin System**: Modular search & action plugins — enable/disable any of them from the dashboard's Features tab. Queried in parallel on every keystroke:
   - 📋 **Clipboard Manager** — persistent history (SQLite), instant search, one-click paste (auto-pastes into the last focused app).
   - 🔄 **Natural Converter** — length/weight/temperature conversions plus **live currency rates** via the Frankfurter API (ECB data), cached for 6h ("10kg to lbs", "10 usd to eur").
@@ -31,11 +33,9 @@ Made for the generation that hates loading screens.
   - ⏱️ **Focus Timer** — quick countdown timers with a native notification.
   - 🎨 **Color Picker**, 🌐 **IP Checker** (real local + public IP), ⛅ **Live Weather** via Open-Meteo ("weather london"), 💬 **Text Snippets** (`!sig` → expanded text).
 - **Workflow / Hotkey Engine**: Bind shell commands, launch args, or workflows to keywords or global hotkeys.
-- **Custom Themes**: Accent & background colors configurable from the dashboard.
 - **Settings Dashboard**: Manage hotkeys, custom app shortcuts, and per-plugin enable/disable from a dedicated window. Feature availability (e.g. the clipboard hotkey, custom app hotkeys) is driven entirely by the enabled-plugins list.
 - **System Commands**: Sleep / Shut Down / Restart straight from the search bar (`rundll32`/`shutdown` on Windows, `systemctl` on Linux).
 - **Math Solver & Web Parsing**: Resolves equations instantly and copies the result ("45 * 2"), plus "g <query>" Google search.
-- **Directory Browsing**: Type a path (e.g. `C:\` on Windows, `/home/user` on Linux) and drill through folders with Tab / Enter / Backspace.
 - **Background Daemon**: Stays resident in the tray, summoned with `Alt+Space`.
 
 ## 🛠️ Tech Stack & Architecture

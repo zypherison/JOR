@@ -15,11 +15,7 @@
       </div>
 
       <nav class="nav">
-        <div class="nav-item active" onclick="showTab('appearance')">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 0-4-4h-1.5a1.5 1.5 0 0 1-1.5-1.5A1.5 1.5 0 0 1 16.5 5H18a4 4 0 0 0 4-4 10 10 0 0 0-10-2z"></path></svg>
-          Appearance
-        </div>
-        <div class="nav-item" onclick="showTab('hotkeys')">
+        <div class="nav-item active" onclick="showTab('hotkeys')">
           <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M6 16h.01M18 16h.01"></path></svg>
           Hotkeys
         </div>
@@ -47,28 +43,6 @@
 
     <main class="main">
       <div class="container">
-        <!-- Appearance -->
-        <div id="tab-appearance">
-          <h1>Appearance</h1>
-          <div class="section">
-            <div class="section-title">Color Palette</div>
-            <div class="control-group">
-              <div class="control-row">
-                <div class="control-label"><span>Accent Color</span><small>Highlight and focus color</small></div>
-                <input type="color" id="theme-accent">
-              </div>
-              <div class="control-row">
-                <div class="control-label"><span>Background (Top)</span><small>Upper edge of the gradient</small></div>
-                <input type="color" id="theme-bg-top">
-              </div>
-              <div class="control-row">
-                <div class="control-label"><span>Background (Bottom)</span><small>Lower edge of the gradient</small></div>
-                <input type="color" id="theme-bg-bottom">
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- Hotkeys -->
         <div id="tab-hotkeys" style="display:none">
           <h1>Hotkeys</h1>
@@ -131,19 +105,15 @@
           </div>
 
           <div class="section">
-            <div class="section-title">Architects &amp; Engineering</div>
+            <div class="section-title">Design Goals</div>
             <div class="control-group">
               <p style="font-size: 14px; line-height: 1.6; color: var(--text-muted);">
-                JOR is a high-performance productivity launcher engineered for speed.
-                Developed and maintained by the core architecture team.
+                JOR is engineered to feel instant even on slow or lagging hardware.
+                A tiny Rust core, a native WebView, and no framework overhead keep
+                memory and CPU usage to a minimum.
               </p>
-              <div style="margin-top: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <div style="font-size: 13px; color: var(--accent); font-weight: 700;">• zypherison</div>
-                <div style="font-size: 13px; color: var(--accent); font-weight: 700;">• Saif-Ali-Baig</div>
-                <div style="font-size: 13px; color: var(--accent); font-weight: 700;">• zeo-nyx</div>
-              </div>
               <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--panel-border);">
-                <div style="font-size: 12px; color: var(--text-muted);">&copy; 2026 JOR Productivity Systems. Proprietary Technology.</div>
+                <div style="font-size: 12px; color: var(--text-muted);">&copy; 2026 JOR Productivity Systems.</div>
               </div>
             </div>
           </div>
@@ -188,10 +158,9 @@
   </div>
 
   <script type="module">
-    import { applyTheme, showToast } from "./js/shared.js";
+    import { showToast } from "./js/shared.js";
 
     const { invoke } = window.__TAURI__.core;
-    const { listen } = window.__TAURI__.event;
 
     let settings = {};
 
@@ -201,16 +170,8 @@
     async function load() {
       settings = await invoke("get_settings");
 
-      // Map to UI
-      document.getElementById("theme-accent").value = settings.theme.accent;
-      document.getElementById("theme-bg-top").value = settings.theme.bg_top;
-      document.getElementById("theme-bg-bottom").value = settings.theme.bg_bottom;
-
       document.getElementById("hk-main").value = settings.main_hotkey;
       document.getElementById("hk-clip").value = settings.clip_hotkey;
-
-      // Keep the dashboard in sync with the chosen theme.
-      applyTheme(settings.theme);
 
       await renderPlugins();
       updateFeatureLocks();
@@ -235,7 +196,7 @@
     }
 
     window.showTab = (tab) => {
-      ['appearance', 'hotkeys', 'features', 'about'].forEach(t => {
+      ['hotkeys', 'features', 'about'].forEach(t => {
         const el = document.getElementById('tab-' + t);
         if (el) el.style.display = (t === tab) ? 'block' : 'none';
       });
@@ -453,37 +414,24 @@
       }
     });
 
-    // Keep the dashboard theme in sync when settings change elsewhere.
-    listen("theme-changed", (event) => applyTheme(event.payload));
-
     window.repairSettings = async () => {
       if (confirm("This will reset all your settings and custom hotkeys to default. Are you sure?")) {
         settings.custom_hotkeys = {};
         settings.main_hotkey = "Alt+Space";
         settings.clip_hotkey = "Alt+V";
-        // Match the actual default accent in the Rust settings (not a one-off).
-        settings.theme.accent = "#8b5cf6";
         renderCustomHotkeys();
         document.getElementById("hk-main").value = "Alt+Space";
         document.getElementById("hk-clip").value = "Alt+V";
-        document.getElementById("theme-accent").value = "#8b5cf6";
-        applyTheme(settings.theme);
         showToast("Settings repaired — click Save Changes to apply", "success");
       }
     };
 
     window.saveSettings = async () => {
-      // Collect values
-      settings.theme.accent = document.getElementById("theme-accent").value;
-      settings.theme.bg_top = document.getElementById("theme-bg-top").value;
-      settings.theme.bg_bottom = document.getElementById("theme-bg-bottom").value;
-
       settings.main_hotkey = document.getElementById("hk-main").value;
       settings.clip_hotkey = document.getElementById("hk-clip").value;
 
       try {
         await invoke("update_settings", { newSettings: settings });
-        applyTheme(settings.theme);
         showToast("Settings saved & applied", "success");
       } catch (err) {
         showToast("Error saving settings: " + err, "error");

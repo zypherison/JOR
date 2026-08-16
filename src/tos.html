@@ -39,7 +39,6 @@
   </div>
 
   <script type="module">
-    import { applyTheme } from "./js/shared.js";
     const { invoke } = window.__TAURI__.core;
     const { getCurrentWindow } = window.__TAURI__.window;
 
@@ -52,14 +51,6 @@
         console.error(err);
       }
     };
-
-    // Keep the legal page in sync with the chosen theme.
-    (async () => {
-      try {
-        const settings = await invoke("get_settings");
-        applyTheme(settings.theme);
-      } catch (_) {}
-    })();
 
     document.getElementById('accept-btn').onclick = async () => {
       try {
