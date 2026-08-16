@@ -37,6 +37,8 @@ jobs:
           fetch-depth: 0 # Full history for the changelog
 
       # ── Compute release tag: <branch>.<iteration> ────────
+      # Uses git ls-remote (already authenticated by actions/checkout) to find
+      # the highest existing iteration for this branch — no gh CLI needed.
       - name: Compute release tag (branch + iteration)
         id: version
         shell: pwsh
@@ -45,17 +47,15 @@ jobs:
           $branch = "${{ github.ref_name }}"
           $safe = ($branch -replace '[^A-Za-z0-9._-]', '-')
           $prefix = "${safe}."
+          $escaped = [regex]::Escape($prefix)
 
-          # Find the highest iteration already published for this branch.
+          # Highest iteration already published for this branch (from remote tags).
           $iter = 0
-          $releases = gh release list --limit 1000 --json tagName | ConvertFrom-Json
-          foreach ($r in $releases) {
-            $tag = $r.tagName
-            if ($tag.StartsWith($prefix)) {
-              $n = 0
-              if ([int]::TryParse($tag.Substring($prefix.Length), [ref]$n) -and $n -gt $iter) {
-                $iter = $n
-              }
+          $remoteTags = git ls-remote --tags origin 2>$null
+          foreach ($line in $remoteTags) {
+            if ($line -match "refs/tags/$escaped(\d+)$") {
+              $n = [int]$matches[1]
+              if ($n -gt $iter) { $iter = $n }
             }
           }
           $iter++
@@ -63,15 +63,18 @@ jobs:
           # Guard: never reuse an existing tag (double safety).
           $tag = "$prefix$iter"
           while ($true) {
-            gh release view $tag --json tagName 2>$null | Out-Null
-            if ($LASTEXITCODE -ne 0) { break }
+            $exists = git ls-remote --tags origin $tag 2>$null
+            if (-not $exists) { break }
             $iter++
             $tag = "$prefix$iter"
           }
 
+          if (-not $tag) { throw "Failed to compute a release tag" }
           echo "BRANCH=$branch" >> $env:GITHUB_OUTPUT
           echo "TAG=$tag" >> $env:GITHUB_OUTPUT
           echo "ITERATION=$iter" >> $env:GITHUB_OUTPUT
+          # Exit explicitly so a stale native-command exit code can never fail the step.
+          exit 0
 
       # ── Build a small changelog from recent commits ───────
       - name: Build changelog
