@@ -227,9 +227,16 @@ impl Indexer {
     }
 
     /// Serialize index to disk for potential future caching.
+    /// Skips the write when the bytes are unchanged so background refreshes
+    /// don't churn the SSD on every launch.
     pub fn save_index(entries: &[Entry], path: &Path) -> std::io::Result<()> {
         let encoded = bincode::serialize(entries)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        if let Ok(existing) = fs::read(path) {
+            if existing == encoded {
+                return Ok(());
+            }
+        }
         let mut file = fs::File::create(path)?;
         file.write_all(&encoded)?;
         Ok(())

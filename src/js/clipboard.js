@@ -16,6 +16,7 @@ const clearBtn = document.getElementById("clear-btn");
 let selectedIndex = 0;
 let entries = [];
 let requestSeq = 0;
+let prevListEmpty = true; // Gates the entrance animation to fresh lists only
 
 // All clipboard entries use EntryKind 8 (Clipboard) → clipboard icon.
 const performSearch = debounce(async () => {
@@ -37,13 +38,19 @@ function renderResults() {
 
   if (entries.length === 0) {
     resultsList.innerHTML = `<div class="empty">No history found.</div>`;
+    prevListEmpty = true;
     return;
   }
+
+  // Animate only when the list was empty before (window open), not on every
+  // keystroke re-render.
+  const animate = prevListEmpty;
+  prevListEmpty = false;
 
   const fragment = document.createDocumentFragment();
   entries.forEach((res, i) => {
     const li = document.createElement("li");
-    li.className = "item" + (i === selectedIndex ? " active" : "");
+    li.className = "item" + (animate ? " animate" : "") + (i === selectedIndex ? " active" : "");
 
     const icon = document.createElement("div");
     icon.className = "item-icon";

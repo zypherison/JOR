@@ -68,7 +68,7 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "../logo.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
     ],

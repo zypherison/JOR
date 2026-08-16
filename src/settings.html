@@ -611,10 +611,12 @@
         settings.custom_hotkeys = {};
         settings.main_hotkey = "Alt+Space";
         settings.clip_hotkey = "Alt+V";
-        settings.theme.accent = "#5c7cfa";
+        // Match the actual default accent in the Rust settings (not a one-off).
+        settings.theme.accent = "#8b5cf6";
         renderCustomHotkeys();
         document.getElementById("hk-main").value = "Alt+Space";
         document.getElementById("hk-clip").value = "Alt+V";
+        document.getElementById("theme-accent").value = "#8b5cf6";
         alert("Settings repaired! Please click 'Save Changes' to apply.");
       }
     };

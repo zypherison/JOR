@@ -26,6 +26,7 @@ let isExploring = false;   // True while in directory browse mode
 let currentMode = "standard"; // standard | clipboard
 let searchTimer = null;
 let requestSeq = 0;        // Guards against out-of-order async responses
+let prevListEmpty = true;  // Gates the entrance animation to fresh lists only
 
 const iconCache = new Map();
 const pendingIcons = new Set();
@@ -195,12 +196,18 @@ function renderResults() {
     if (input.value.length > 0) {
       results.innerHTML = `<li class="empty">No results found</li>`;
     }
+    prevListEmpty = true;
     return;
   }
 
+  // Animate only when the list was empty before (window open / new query),
+  // not on every keystroke re-render.
+  const animate = prevListEmpty;
+  prevListEmpty = false;
+
   entries.forEach((entry, i) => {
     const li = document.createElement("li");
-    li.className = `item${i === selectedIndex ? " active" : ""}`;
+    li.className = `item${animate ? " animate" : ""}${i === selectedIndex ? " active" : ""}`;
 
     // Badge text
     let badge = "";
