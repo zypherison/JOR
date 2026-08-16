@@ -49,3 +49,19 @@ codegen-units = 1
 lto = true
 opt-level = "z"
 strip = true
+
+# The whole binary is size-optimized (opt-level z), but the crates that run
+# on every keystroke / every serialization get full optimization. Per-package
+# settings apply even under LTO, so the hot code paths stay fast while the
+# rest of the binary stays small.
+[profile.release.package.fuzzy-matcher]
+opt-level = 3
+
+[profile.release.package.regex]
+opt-level = 3
+
+[profile.release.package.rusqlite]
+opt-level = 3
+
+[profile.release.package.serde_json]
+opt-level = 3
