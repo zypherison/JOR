@@ -13,6 +13,11 @@ const input = document.getElementById("search-input");
 const resultsList = document.getElementById("results");
 const clearBtn = document.getElementById("clear-btn");
 
+// Cross-window navigation: gear icon opens the settings dashboard.
+document.getElementById("open-settings")?.addEventListener("click", () => {
+  invoke("show_window", { label: "settings" });
+});
+
 let selectedIndex = 0;
 let entries = [];
 let requestSeq = 0;

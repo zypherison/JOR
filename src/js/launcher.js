@@ -18,6 +18,12 @@ const input = document.getElementById("search-input");
 const results = document.getElementById("results");
 const refreshModal = document.getElementById("refresh-modal");
 
+// ── Cross-window navigation ─────────────────────────────────
+
+document.getElementById("open-settings")?.addEventListener("click", () => {
+  invoke("show_window", { label: "settings" });
+});
+
 // ── State ───────────────────────────────────────────────────
 
 let entries = [];          // Current result set

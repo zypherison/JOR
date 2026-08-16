@@ -588,6 +588,18 @@ async fn hide_window(window: Window) {
     window.hide().ok();
 }
 
+/// Show and focus a named JOR window. Used for cross-window navigation
+/// (launcher → dashboard, dashboard → launcher/clipboard/ToS, etc.).
+#[tauri::command]
+async fn show_window(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    let window = app
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("window '{label}' not found"))?;
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn list_directory(path: String) -> Result<Vec<Entry>, String> {
     let mut entries = Vec::new();
@@ -877,6 +889,7 @@ fn main() {
             search,
             launch,
             hide_window,
+            show_window,
             list_directory,
             get_settings,
             update_settings,

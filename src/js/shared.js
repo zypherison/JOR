@@ -59,3 +59,18 @@ export function applyTheme(theme) {
   root.setProperty("--accent", theme.accent);
   root.setProperty("--panel-border", theme.panel_border);
 }
+
+/** Show a transient toast notification (reuses a single shared element). */
+export function showToast(message, type = "success", duration = 2400) {
+  let toast = document.querySelector(".notification-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.className = "notification-toast";
+    document.body.appendChild(toast);
+  }
+  toast.className = `notification-toast ${type}`;
+  toast.textContent = message;
+  requestAnimationFrame(() => toast.classList.add("show"));
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => toast.classList.remove("show"), duration);
+}
