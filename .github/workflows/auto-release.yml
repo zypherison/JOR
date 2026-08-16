@@ -1,12 +1,15 @@
 name: "Branch Auto Release"
 
-# Builds the pushed branch and publishes a BRAND-NEW GitHub release on every
-# push to ANY branch. Releases are tagged "<branch>.<iteration>" (e.g.
-# optimized-overhaul.1, optimized-overhaul.2) so they can never collide with
-# or modify existing releases such as the stable v1.0.0.
+# Builds the pushed branch for Windows AND Linux and publishes a BRAND-NEW
+# GitHub release on every push to ANY branch. Releases are tagged
+# "<branch>.<iteration>" (e.g. optimized-overhaul.1, optimized-overhaul.2) so
+# they can never collide with or modify existing releases such as v1.0.0 or
+# v2.0.4.
 #
-# Runs are serialized per branch (concurrency group) and the tag is guarded
-# against existing releases, so an iteration number is never reused and no
+# A single `prepare` job computes the tag/version/changelog; the Windows job
+# creates the release and the Linux job appends its packages to the same
+# release. Runs are serialized per branch (concurrency group) and the tag is
+# guarded against existing tags, so an iteration is never reused and no
 # existing release is ever touched.
 
 on:
@@ -23,20 +26,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-release:
-    runs-on: windows-latest
-
-    # Make the GitHub CLI (gh) available in steps that inspect releases.
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+  # ── Shared: tag + version + changelog ────────────────────
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      TAG: ${{ steps.version.outputs.TAG }}
+      BRANCH: ${{ steps.version.outputs.BRANCH }}
+      ITERATION: ${{ steps.version.outputs.ITERATION }}
+      RELEASE_BODY: ${{ steps.body.outputs.releaseBody }}
     steps:
-      # ── Checkout (builds the pushed working tree as-is) ──
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Full history for the changelog
 
-      # ── Compute release tag: <branch>.<iteration> ────────
+      # Compute release tag: <branch>.<iteration>
       # Uses git ls-remote (already authenticated by actions/checkout) to find
       # the highest existing iteration for this branch — no gh CLI needed.
       - name: Compute release tag (branch + iteration)
@@ -76,7 +79,7 @@ jobs:
           # Exit explicitly so a stale native-command exit code can never fail the step.
           exit 0
 
-      # ── Build a small changelog from recent commits ───────
+      # Build a small changelog from recent commits.
       - name: Build changelog
         id: changelog
         shell: pwsh
@@ -92,32 +95,33 @@ jobs:
         run: |
           { echo 'releaseBody<<EOF'; cat changelog.txt; echo 'EOF'; } >> "$GITHUB_OUTPUT"
 
-      # ── Sync a unique version into project files ─────────
-      # 1.0.<iteration> is strict semver (required by tauri.conf.json) and
-      # MSI/NSIS-safe, bumps per branch build, and never collides with the
-      # stable v1.0.0.
+  # ── Windows build (creates the release) ──────────────────
+  build-windows:
+    runs-on: windows-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1.0.<iteration> is strict semver (required by tauri.conf.json), unique
+      # per branch build, and never collides with the stable v1.0.0 / v2.0.4.
       - name: Sync version into project files
         shell: pwsh
         run: |
-          $ver = "1.0.${{ steps.version.outputs.ITERATION }}"
+          $ver = "1.0.${{ needs.prepare.outputs.ITERATION }}"
 
-          # Update tauri.conf.json
           $tauri = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
           $tauri.version = $ver
           $tauri | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
 
-          # Update package.json
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           $pkg.version = $ver
           $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
 
-          # Update ONLY the [package] version in Cargo.toml (not dependency versions)
           $lines = Get-Content src-tauri/Cargo.toml
           $inPackage = $false
           for ($i = 0; $i -lt $lines.Count; $i++) {
             if ($lines[$i] -match '^\[package\]') { $inPackage = $true }
             elseif ($lines[$i] -match '^\[') { $inPackage = $false }
-
             if ($inPackage -and $lines[$i] -match '^version\s*=') {
               $lines[$i] = "version = `"$ver`""
               break
@@ -125,7 +129,6 @@ jobs:
           }
           $lines | Set-Content src-tauri/Cargo.toml
 
-      # ── Setup toolchains ─────────────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -137,14 +140,79 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # ── Build with Tauri + publish a NEW release ─────────
-      - name: Build & publish release
+      - name: Build & publish Windows release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ steps.version.outputs.TAG }}
-          releaseName: "JOR — ${{ steps.version.outputs.BRANCH }} #${{ steps.version.outputs.ITERATION }}"
-          releaseBody: ${{ steps.body.outputs.releaseBody }}
+          tagName: ${{ needs.prepare.outputs.TAG }}
+          releaseName: "JOR — ${{ needs.prepare.outputs.BRANCH }} #${{ needs.prepare.outputs.ITERATION }}"
+          releaseBody: ${{ needs.prepare.outputs.RELEASE_BODY }}
+          releaseDraft: false
+          prerelease: true
+
+  # ── Linux build (appends packages to the same release) ───
+  build-linux:
+    runs-on: ubuntu-22.04
+    needs: [prepare, build-windows]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            rpm \
+            libssl-dev
+
+      - name: Sync version into project files
+        shell: pwsh
+        run: |
+          $ver = "1.0.${{ needs.prepare.outputs.ITERATION }}"
+
+          $tauri = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $tauri.version = $ver
+          $tauri | ConvertTo-Json -Depth 10 | Set-Content src-tauri/tauri.conf.json
+
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $pkg.version = $ver
+          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
+
+          $lines = Get-Content src-tauri/Cargo.toml
+          $inPackage = $false
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^\[package\]') { $inPackage = $true }
+            elseif ($lines[$i] -match '^\[') { $inPackage = $false }
+            if ($inPackage -and $lines[$i] -match '^version\s*=') {
+              $lines[$i] = "version = `"$ver`""
+              break
+            }
+          }
+          $lines | Set-Content src-tauri/Cargo.toml
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Uploads AppImage + deb + rpm to the release created by the Windows job.
+      - name: Build & upload Linux release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ needs.prepare.outputs.TAG }}
+          releaseName: "JOR — ${{ needs.prepare.outputs.BRANCH }} #${{ needs.prepare.outputs.ITERATION }}"
+          releaseBody: ${{ needs.prepare.outputs.RELEASE_BODY }}
           releaseDraft: false
           prerelease: true
