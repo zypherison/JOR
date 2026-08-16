@@ -282,8 +282,8 @@ async fn get_app_icon(path: String) -> Result<String, String> {
 
         // Clean up immediately
         SelectObject(hdc_mem, hold_bm);
-        DeleteObject(hbm_mem);
-        DeleteDC(hdc_mem);
+        let _ = DeleteObject(hbm_mem);
+        let _ = DeleteDC(hdc_mem);
         ReleaseDC(HWND(0), hdc_screen);
         let _ = DeleteObject(icon_info.hbmColor);
         let _ = DeleteObject(icon_info.hbmMask);
