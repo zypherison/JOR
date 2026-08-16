@@ -59,10 +59,27 @@ impl Plugin for SystemInfoPlugin {
     }
 
     async fn execute(&self, _action_id: &str) -> Result<(), String> {
-        // Open Task Manager for a deep dive
-        std::process::Command::new("taskmgr")
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        // Open the platform's system monitor for a deep dive.
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("taskmgr")
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // GNOME first, then KDE, then a plain xterm as last resort.
+            for monitor in ["gnome-system-monitor", "ksysguard", "xterm"] {
+                if std::process::Command::new(monitor)
+                    .spawn()
+                    .map(|_| ())
+                    .is_ok()
+                {
+                    break;
+                }
+            }
+        }
+        // Other platforms: nothing to launch.
         Ok(())
     }
 }

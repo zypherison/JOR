@@ -52,14 +52,33 @@ impl Plugin for TimerPlugin {
             if let Ok(mins) = mins_str.parse::<u64>() {
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(mins * 60));
-                    // Alert the user via PowerShell msgbox for a real functionality
                     let msg = format!("Focus block of {} minutes is complete!", mins);
-                    let _ = std::process::Command::new("powershell")
-                        .args(["-Command", &format!("Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('{}', 'JOR Systems — Focus Timer')", msg)])
-                        .spawn();
+                    notify_timer_done(&msg);
                 });
             }
         }
         Ok(())
     }
 }
+
+/// Platform-appropriate timer completion alert.
+#[cfg(target_os = "windows")]
+fn notify_timer_done(msg: &str) {
+    let _ = std::process::Command::new("powershell")
+        .args(["-Command", &format!("Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('{}', 'JOR — Focus Timer')", msg)])
+        .spawn();
+}
+
+#[cfg(target_os = "linux")]
+fn notify_timer_done(msg: &str) {
+    // notify-send (libnotify) is present on virtually all desktop distros.
+    let _ = std::process::Command::new("notify-send")
+        .args(["--app-name=JOR", "--urgency=normal", "JOR — Focus Timer", msg])
+        .spawn();
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn notify_timer_done(_msg: &str) {
+    // No-op on other platforms (macOS alerts would need a native API).
+}
+

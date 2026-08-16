@@ -17,7 +17,9 @@ fn is_legacy_recycle_workflow(wf: &Workflow) -> bool {
 
 /// Returns the path to the JOR config directory.
 pub fn config_dir() -> PathBuf {
-    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("C:\\"));
+    let base = dirs::config_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_default();
     base.join("jor")
 }
 

@@ -30,6 +30,31 @@ let requestSeq = 0;        // Guards against out-of-order async responses
 const iconCache = new Map();
 const pendingIcons = new Set();
 
+// ── Path helpers (platform-agnostic explore mode) ───────────
+
+// Returns the separator style used by an absolute path: `\` for
+// Windows drive paths, `/` everywhere else (Linux/macOS, `~/`).
+function pathSep(p) {
+  return /^[a-zA-Z]:[\\\/]/.test(p) ? "\\" : "/";
+}
+
+function withTrailingSep(p) {
+  if (!p.endsWith("\\") && !p.endsWith("/")) return p + pathSep(p);
+  return p;
+}
+
+// Pops one path segment; returns null at the filesystem root.
+function parentPath(p) {
+  const trimmed = p.replace(/[\\\/]+$/, "");
+  if (!trimmed) return null;
+  const idx = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
+  if (idx <= 0) {
+    // Drive root ("C:") or filesystem root ("/") — cannot go up.
+    return trimmed.match(/^[a-zA-Z]:$/) ? null : trimmed + pathSep(p);
+  }
+  return trimmed.slice(0, idx) + pathSep(p);
+}
+
 // ── Theme Syncing ───────────────────────────────────────────
 
 listen("theme-changed", (event) => applyTheme(event.payload));
@@ -234,9 +259,7 @@ async function launchEntry(entry) {
       await navigator.clipboard.writeText(entry.path);
     } else if (entry.kind === 2 && isExploring) {
       // Folder in explore mode → drill down
-      let p = entry.path;
-      if (!p.endsWith("\\") && !p.endsWith("/")) p += "\\";
-      input.value = p;
+      input.value = withTrailingSep(entry.path);
       scheduleSearch();
       return;
     } else {
@@ -263,9 +286,7 @@ function handleTab() {
 
   if (top.kind === 2) {
     // Folder: drill into it
-    let p = top.path;
-    if (!p.endsWith("\\") && !p.endsWith("/")) p += "\\";
-    input.value = p;
+    input.value = withTrailingSep(top.path);
     isExploring = true;
     scheduleSearch();
   } else {
@@ -381,12 +402,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 
       case "Backspace":
         // In explore mode, Backspace on empty input goes up one dir
-        if (isExploring && input.value.endsWith("\\")) {
+        if (isExploring && (input.value.endsWith("\\") || input.value.endsWith("/"))) {
           e.preventDefault();
-          const parts = input.value.slice(0, -1).split("\\");
-          parts.pop();
-          if (parts.length > 0) {
-            input.value = parts.join("\\") + "\\";
+          const parent = parentPath(input.value);
+          if (parent) {
+            input.value = parent;
             scheduleSearch();
           }
         }

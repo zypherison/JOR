@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────
 // JOR — File System Indexer
-// Crawls standard Windows directories and builds a searchable
+// Crawls the platform's standard directories (Start Menu / .desktop
+// applications, user folders, extra paths) and builds a searchable
 // in-memory index of apps, files, and folders.
 // ─────────────────────────────────────────────────────────────
 
@@ -15,7 +16,10 @@ use tauri::Manager;
 pub struct Indexer;
 
 // ── Extension categories ────────────────────────────────────
+#[cfg(target_os = "windows")]
 const EXT_APP:     &[&str] = &["lnk", "exe"];
+#[cfg(not(target_os = "windows"))]
+const EXT_APP:     &[&str] = &["desktop", "appimage"];
 const EXT_DOC:     &[&str] = &["pdf", "docx", "doc", "xlsx", "xls", "csv", "pptx", "ppt", "txt", "md", "rtf", "odt"];
 const EXT_IMAGE:   &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "svg", "webp", "ico"];
 const EXT_VIDEO:   &[&str] = &["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm"];
@@ -63,14 +67,26 @@ impl Indexer {
         let mut visited: HashSet<String> = HashSet::new();
         let mut paths_to_index: Vec<(PathBuf, bool)> = Vec::new();
 
-        // ── Start Menu shortcuts (deep crawl) ───────────────
-        if let Some(mut p) = dirs::data_dir() {
-            p.push("Microsoft\\Windows\\Start Menu\\Programs");
-            paths_to_index.push((p, true));
+        // ── App shortcuts (deep crawl) ──────────────────────
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(mut p) = dirs::data_dir() {
+                p.push("Microsoft\\Windows\\Start Menu\\Programs");
+                paths_to_index.push((p, true));
+            }
+            paths_to_index.push((
+                PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs"), true
+            ));
         }
-        paths_to_index.push((
-            PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs"), true
-        ));
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(mut p) = dirs::data_dir() {
+                p.push("applications");
+                paths_to_index.push((p, true));
+            }
+            paths_to_index.push((PathBuf::from("/usr/share/applications"), true));
+            paths_to_index.push((PathBuf::from("/var/lib/flatpak/exports/share/applications"), true));
+        }
 
         // ── User directories (shallow — top 2 levels) ───────
         if let Some(p) = dirs::desktop_dir()  { paths_to_index.push((p, false)); }
@@ -81,9 +97,12 @@ impl Indexer {
         if let Some(p) = dirs::audio_dir()    { paths_to_index.push((p, false)); }
         if let Some(p) = dirs::home_dir()     { paths_to_index.push((p, false)); }
         
-        // ── Program Files (shallow) ────────────────────────
-        paths_to_index.push((PathBuf::from("C:\\Program Files"), false));
-        paths_to_index.push((PathBuf::from("C:\\Program Files (x86)"), false));
+        // ── Program Files (shallow, Windows only) ───────────
+        #[cfg(target_os = "windows")]
+        {
+            paths_to_index.push((PathBuf::from("C:\\Program Files"), false));
+            paths_to_index.push((PathBuf::from("C:\\Program Files (x86)"), false));
+        }
 
         for extra in extra_paths {
             let p = PathBuf::from(extra);
@@ -110,10 +129,19 @@ impl Indexer {
             }
         }
 
+        // Power actions differ per platform. These commands must stay in sync
+        // with the allow-list in main.rs (`allowed_system_cmds`).
+        #[cfg(target_os = "windows")]
         let system_actions = vec![
             ("Sleep",             "Sleep your PC",    "rundll32.exe powrprof.dll,SetSuspendState 0,1,0"),
             ("Shut Down",         "Power off",        "shutdown /s /t 0"),
             ("Restart",           "Reboot system",    "shutdown /r /t 0"),
+        ];
+        #[cfg(not(target_os = "windows"))]
+        let system_actions = vec![
+            ("Sleep",             "Suspend the system", "systemctl suspend"),
+            ("Shut Down",         "Power off",          "systemctl poweroff"),
+            ("Restart",           "Reboot system",      "systemctl reboot"),
         ];
 
         for (name, subtitle, cmd) in system_actions {
@@ -173,7 +201,7 @@ impl Indexer {
             return None;
         };
 
-        // For apps (.lnk/.exe), show just the stem; for files show full name
+        // For apps (.lnk/.exe/.desktop), show just the stem; for files show full name
         let display_name = if kind == EntryKind::App {
             stem.clone()
         } else {

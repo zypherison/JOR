@@ -51,6 +51,17 @@ pub struct Workflow {
     pub args: Vec<String>,
 }
 
+/// The terminal binary that ships with the platform (Windows Terminal on
+/// Windows; the alternatives symlink on Debian/Ubuntu-family Linux).
+fn default_terminal_command() -> &'static str {
+    #[cfg(target_os = "windows")]
+    { "wt" }
+    #[cfg(target_os = "linux")]
+    { "x-terminal-emulator" }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    { "x-terminal-emulator" }
+}
+
 /// Top-level configuration, persisted to %AppData%/jor/config.json.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
@@ -67,7 +78,7 @@ impl Default for Config {
                     name: "Terminal".into(),
                     keyword: Some("terminal".into()),
                     hotkey: Some("alt+t".into()),
-                    command: "wt".into(),
+                    command: default_terminal_command().into(),
                     args: vec![],
                 },
                 Workflow {

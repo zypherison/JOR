@@ -1,15 +1,23 @@
 <div align="center">
   <h1>🚀 JOR: Just Open & Run</h1>
-  <p><strong>The blazingly fast, Gen-Z styled app launcher for Windows.</strong></p>
+  <p><strong>The blazingly fast, Gen-Z styled app launcher for Windows &amp; Linux.</strong></p>
   <img src="https://img.shields.io/badge/built%20with-Tauri%20v2-8b5cf6?style=for-the-badge&logo=tauri" alt="Built with Tauri" />
   <img src="https://img.shields.io/badge/language-Rust%20%2B%20Vanilla%20JS-000000?style=for-the-badge&logo=rust" alt="Rust & JS" />
 </div>
 
 <br />
 
-Say goodbye to sluggish Windows Search and visually outdated launchers. **JOR** (Just Open & Run) is a highly optimized, minimalist Spotlight-style app launcher crafted strictly for performance and modern aesthetics.
+Say goodbye to sluggish OS search and visually outdated launchers. **JOR** (Just Open & Run) is a highly optimized, minimalist Spotlight-style app launcher crafted strictly for performance and modern aesthetics.
 
 Made for the generation that hates loading screens.
+
+## 🖥️ Platforms
+
+| Platform | Status | Notes |
+| --- | --- | --- |
+| **Windows 10/11** | ✅ Full | MSI + NSIS installers; native app icons (GDI), `SendInput` paste simulation, `ms-settings:` pages, tray + global hotkeys. |
+| **Linux** | ✅ Full | AppImage + deb + rpm; `.desktop` app discovery (system + flatpak), systemctl power actions, `notify-send` timers, GNOME system utilities; falls back gracefully on non-GNOME desktops. |
+| **macOS** | 🧪 Portable code | The codebase is platform-clean, but no macOS CI job or signed builds are published yet — add a `build-macos` job to the workflow to enable it. |
 
 ## ✨ Features
 
@@ -25,15 +33,15 @@ Made for the generation that hates loading screens.
 - **Workflow / Hotkey Engine**: Bind shell commands, launch args, or workflows to keywords or global hotkeys.
 - **Custom Themes**: Accent & background colors configurable from the dashboard.
 - **Settings Dashboard**: Manage hotkeys, custom app shortcuts, and per-plugin enable/disable from a dedicated window. Feature availability (e.g. the clipboard hotkey, custom app hotkeys) is driven entirely by the enabled-plugins list.
-- **System Commands**: Lock, Sleep, Restart straight from the search bar.
+- **System Commands**: Sleep / Shut Down / Restart straight from the search bar (`rundll32`/`shutdown` on Windows, `systemctl` on Linux).
 - **Math Solver & Web Parsing**: Resolves equations instantly and copies the result ("45 * 2"), plus "g <query>" Google search.
-- **Directory Browsing**: Type a path (e.g. `C:\`) and drill through folders with Tab / Enter.
+- **Directory Browsing**: Type a path (e.g. `C:\` on Windows, `/home/user` on Linux) and drill through folders with Tab / Enter / Backspace.
 - **Background Daemon**: Stays resident in the tray, summoned with `Alt+Space`.
 
 ## 🛠️ Tech Stack & Architecture
 
 - **Tauri v2** — windowing, transparency, native bridging, global shortcuts, tray.
-- **Rust Core** — filesystem indexing, fuzzy search (`fuzzy-matcher`), clipboard DB (`rusqlite`), icon extraction (Win32 GDI), and plugin execution.
+- **Rust Core** — filesystem indexing, fuzzy search (`fuzzy-matcher`), clipboard DB (`rusqlite`), Windows app-icon extraction (Win32 GDI, gated to Windows-only deps), and plugin execution.
 - **Vanilla JS / HTML / CSS** — no React, no bundler; pages are served straight from `src/`.
 
 ```

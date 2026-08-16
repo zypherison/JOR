@@ -13,8 +13,8 @@
 //   settings.rs   — User settings persistence
 // ─────────────────────────────────────────────────────────────
 
-// Prevents console window on Windows in release builds
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Prevents a console window on Windows in release builds.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod models;
 mod indexer;
@@ -26,7 +26,6 @@ mod settings;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::collections::HashSet;
-use std::os::windows::ffi::OsStrExt;
 use crate::plugins::Plugin;
 use indexer::Indexer;
 use models::{Config, Entry, EntryKind, Workflow};
@@ -37,22 +36,33 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 use walkdir::WalkDir;
 
+// ── Windows-only imports (GDI icon extraction, SendInput paste) ──
+#[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(target_os = "windows")]
 use base64::{Engine as _, engine::general_purpose};
+#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
+#[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{
     GetDC, ReleaseDC, GetDIBits, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
     CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, DeleteDC, DeleteObject,
 };
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V, VK_MENU, VK_SHIFT,
 };
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::ExtractIconExW;
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, HICON, GetIconInfo, ICONINFO};
 
 const MAX_BROWSE_DEPTH: usize = 8;
 const MAX_BROWSE_RESULTS: usize = 1200;
 
 /// Extra system utilities surfaced in the settings app-picker.
+/// Commands are single tokens (or URI schemes) so they are safe to shell out.
+#[cfg(target_os = "windows")]
 const SYSTEM_UTILITIES: [(&str, &str, &str); 17] = [
     ("Wi-Fi Settings", "ms-settings:network-wifi", "System Settings"),
     ("Bluetooth Settings", "ms-settings:bluetooth", "System Settings"),
@@ -72,6 +82,26 @@ const SYSTEM_UTILITIES: [(&str, &str, &str); 17] = [
     ("Command Prompt", "cmd", "System Utility"),
     ("PowerShell", "powershell", "System Utility"),
 ];
+
+/// Linux equivalents (GNOME-flavored; the launch arm falls back to the
+/// opener for anything missing from PATH).
+#[cfg(target_os = "linux")]
+const SYSTEM_UTILITIES: [(&str, &str, &str); 10] = [
+    ("System Settings", "gnome-control-center", "System Settings"),
+    ("Display Settings", "gnome-control-center display", "System Settings"),
+    ("Sound Settings", "gnome-control-center sound", "System Settings"),
+    ("Network Settings", "gnome-control-center network", "System Settings"),
+    ("Date & Time", "gnome-control-center datetime", "System Settings"),
+    ("Privacy Settings", "gnome-control-center privacy", "System Settings"),
+    ("System Monitor", "gnome-system-monitor", "System Utility"),
+    ("Terminal", "x-terminal-emulator", "System Utility"),
+    ("File Manager", "xdg-open .", "System Utility"),
+    ("Software Center", "gnome-software", "System Utility"),
+];
+
+/// Non-Windows, non-Linux (macOS and friends) fallback.
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+const SYSTEM_UTILITIES: [(&str, &str, &str); 0] = [];
 
 // ── Application State ───────────────────────────────────────
 
@@ -220,98 +250,107 @@ async fn clear_clipboard_history(state: State<'_, AppState>) -> Result<(), Strin
     Err("Clipboard plugin not found".into())
 }
 
-/// Extracts the embedded 32x32 icon from an .exe/.lnk and returns it as a
-/// base64-encoded BMP data URL for the frontend.
+/// Extracts the embedded 32x32 icon from an .exe/.lnk (Windows) and returns
+/// it as a base64-encoded BMP data URL for the frontend.
 #[tauri::command]
 async fn get_app_icon(path: String) -> Result<String, String> {
-    let mut path_wide: Vec<u16> = std::path::Path::new(&path).as_os_str().encode_wide().collect();
-    path_wide.push(0);
+    #[cfg(target_os = "windows")]
+    {
+        let mut path_wide: Vec<u16> = std::path::Path::new(&path).as_os_str().encode_wide().collect();
+        path_wide.push(0);
 
-    let mut large_icon = [HICON(0)];
-    unsafe {
-        ExtractIconExW(
-            windows::core::PCWSTR(path_wide.as_ptr()),
-            0,
-            Some(large_icon.as_mut_ptr()),
-            None,
-            1,
-        );
+        let mut large_icon = [HICON(0)];
+        unsafe {
+            ExtractIconExW(
+                windows::core::PCWSTR(path_wide.as_ptr()),
+                0,
+                Some(large_icon.as_mut_ptr()),
+                None,
+                1,
+            );
 
-        if large_icon[0].is_invalid() {
-            return Err("Icon not found".into());
-        }
+            if large_icon[0].is_invalid() {
+                return Err("Icon not found".into());
+            }
 
-        let hicon = large_icon[0];
-        let mut icon_info = ICONINFO::default();
-        GetIconInfo(hicon, &mut icon_info).map_err(|e| e.to_string())?;
+            let hicon = large_icon[0];
+            let mut icon_info = ICONINFO::default();
+            GetIconInfo(hicon, &mut icon_info).map_err(|e| e.to_string())?;
 
-        let hdc_screen = GetDC(HWND(0));
-        let hdc_mem = CreateCompatibleDC(hdc_screen);
-        let hbm_mem = CreateCompatibleBitmap(hdc_screen, 32, 32);
-        let hold_bm = SelectObject(hdc_mem, hbm_mem);
+            let hdc_screen = GetDC(HWND(0));
+            let hdc_mem = CreateCompatibleDC(hdc_screen);
+            let hbm_mem = CreateCompatibleBitmap(hdc_screen, 32, 32);
+            let hold_bm = SelectObject(hdc_mem, hbm_mem);
 
-        // DI_NORMAL preserves transparency into the target bitmap.
-        windows::Win32::UI::WindowsAndMessaging::DrawIconEx(
-            hdc_mem,
-            0,
-            0,
-            hicon,
-            32,
-            32,
-            0,
-            None,
-            windows::Win32::UI::WindowsAndMessaging::DI_NORMAL,
-        )
-        .map_err(|e| e.to_string())?;
+            // DI_NORMAL preserves transparency into the target bitmap.
+            windows::Win32::UI::WindowsAndMessaging::DrawIconEx(
+                hdc_mem,
+                0,
+                0,
+                hicon,
+                32,
+                32,
+                0,
+                None,
+                windows::Win32::UI::WindowsAndMessaging::DI_NORMAL,
+            )
+            .map_err(|e| e.to_string())?;
 
-        let mut bmi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: 32,
-                biHeight: -32, // Top-down
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: 0,
+            let mut bmi = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: 32,
+                    biHeight: -32, // Top-down
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: 0,
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-            ..Default::default()
-        };
+            };
 
-        let mut buffer = vec![0u8; 32 * 32 * 4];
-        GetDIBits(hdc_mem, hbm_mem, 0, 32, Some(buffer.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
+            let mut buffer = vec![0u8; 32 * 32 * 4];
+            GetDIBits(hdc_mem, hbm_mem, 0, 32, Some(buffer.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
 
-        // Clean up immediately
-        SelectObject(hdc_mem, hold_bm);
-        let _ = DeleteObject(hbm_mem);
-        let _ = DeleteDC(hdc_mem);
-        ReleaseDC(HWND(0), hdc_screen);
-        let _ = DeleteObject(icon_info.hbmColor);
-        let _ = DeleteObject(icon_info.hbmMask);
-        let _ = DestroyIcon(hicon);
+            // Clean up immediately
+            SelectObject(hdc_mem, hold_bm);
+            let _ = DeleteObject(hbm_mem);
+            let _ = DeleteDC(hdc_mem);
+            ReleaseDC(HWND(0), hdc_screen);
+            let _ = DeleteObject(icon_info.hbmColor);
+            let _ = DeleteObject(icon_info.hbmMask);
+            let _ = DestroyIcon(hicon);
 
-        // BMP file header (14 bytes) + DIB header (40 bytes)
-        let mut bmp_file = vec![
-            0x42, 0x4D,             // Signature "BM"
-            0x36, 0x10, 0x00, 0x00, // File size (4150 bytes)
-            0x00, 0x00, 0x00, 0x00, // Reserved
-            0x36, 0x00, 0x00, 0x00, // Data offset (54 bytes)
-            0x28, 0x00, 0x00, 0x00, // DIB Header size (40 bytes)
-            0x20, 0x00, 0x00, 0x00, // Width (32)
-            0xE0, 0xFF, 0xFF, 0xFF, // Height (-32, top-down)
-            0x01, 0x00,             // Planes (1)
-            0x20, 0x00,             // Bits per pixel (32)
-            0x00, 0x00, 0x00, 0x00, // Compression (None)
-            0x00, 0x10, 0x00, 0x00, // Image size (4096 bytes)
-            0x00, 0x00, 0x00, 0x00, // XpixelsPerM
-            0x00, 0x00, 0x00, 0x00, // YpixelsPerM
-            0x00, 0x00, 0x00, 0x00, // Colors used
-            0x00, 0x00, 0x00, 0x00, // Important colors
-        ];
+            // BMP file header (14 bytes) + DIB header (40 bytes)
+            let mut bmp_file = vec![
+                0x42, 0x4D,             // Signature "BM"
+                0x36, 0x10, 0x00, 0x00, // File size (4150 bytes)
+                0x00, 0x00, 0x00, 0x00, // Reserved
+                0x36, 0x00, 0x00, 0x00, // Data offset (54 bytes)
+                0x28, 0x00, 0x00, 0x00, // DIB Header size (40 bytes)
+                0x20, 0x00, 0x00, 0x00, // Width (32)
+                0xE0, 0xFF, 0xFF, 0xFF, // Height (-32, top-down)
+                0x01, 0x00,             // Planes (1)
+                0x20, 0x00,             // Bits per pixel (32)
+                0x00, 0x00, 0x00, 0x00, // Compression (None)
+                0x00, 0x10, 0x00, 0x00, // Image size (4096 bytes)
+                0x00, 0x00, 0x00, 0x00, // XpixelsPerM
+                0x00, 0x00, 0x00, 0x00, // YpixelsPerM
+                0x00, 0x00, 0x00, 0x00, // Colors used
+                0x00, 0x00, 0x00, 0x00, // Important colors
+            ];
 
-        // GDI buffer is already BGRA, which BMP expects.
-        bmp_file.extend(buffer);
-        let b64 = general_purpose::STANDARD.encode(bmp_file);
-        Ok(format!("data:image/bmp;base64,{}", b64))
+            // GDI buffer is already BGRA, which BMP expects.
+            bmp_file.extend(buffer);
+            let b64 = general_purpose::STANDARD.encode(bmp_file);
+            Ok(format!("data:image/bmp;base64,{}", b64))
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path;
+        Err("App icon extraction is only supported on Windows".into())
     }
 }
 
@@ -400,21 +439,60 @@ async fn launch(entry: Entry, app: AppHandle) -> Result<(), String> {
             Ok(())
         }
         EntryKind::System => {
-            let allowed_system_cmds = [
-                "rundll32.exe powrprof.dll,SetSuspendState 0,1,0",
-                "shutdown /s /t 0",
-                "shutdown /r /t 0",
-            ];
+            // Only pre-approved commands may run; the set differs per platform.
+            let allowed_system_cmds: Vec<&str> = {
+                #[cfg(target_os = "windows")]
+                {
+                    vec![
+                        "rundll32.exe powrprof.dll,SetSuspendState 0,1,0",
+                        "shutdown /s /t 0",
+                        "shutdown /r /t 0",
+                    ]
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    vec!["systemctl suspend", "systemctl poweroff", "systemctl reboot"]
+                }
+            };
 
             if allowed_system_cmds.contains(&entry.path.as_str()) {
-                std::process::Command::new("cmd")
-                    .args(["/C", &entry.path])
-                    .spawn()
-                    .map_err(|e| e.to_string())?;
-            } else {
-                return Err("Unauthorized system command".into());
+                return run_system_command(&entry.path);
             }
-            Ok(())
+
+            // Windows URI-style settings pages open via explorer (start command
+            // semantics without cmd's quirks).
+            #[cfg(target_os = "windows")]
+            if entry.path.starts_with("ms-settings:") {
+                return std::process::Command::new("explorer.exe")
+                    .arg(&entry.path)
+                    .spawn()
+                    .map(|_| ())
+                    .map_err(|e| e.to_string());
+            }
+
+            // Registered system utilities from the app-picker may run.
+            if SYSTEM_UTILITIES.iter().any(|(_, p, _)| *p == entry.path) {
+                #[cfg(target_os = "windows")]
+                {
+                    // cmd /C resolves .msc / control / etc. through shell semantics.
+                    return run_system_command(&entry.path);
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    // Multi-token entries (e.g. "gnome-control-center display") are
+                    // split into program + args so nothing is shell-interpreted.
+                    let mut parts = entry.path.split_whitespace();
+                    let program = parts.next().ok_or("Empty system command")?;
+                    let args: Vec<&str> = parts.collect();
+                    return std::process::Command::new(program)
+                        .args(&args)
+                        .spawn()
+                        .map(|_| ())
+                        .map_err(|e| e.to_string());
+                }
+            }
+
+            Err("Unauthorized system command".into())
         }
         EntryKind::Plugin => {
             if let Some((plugin_id, action_id)) = entry.path.split_once(':') {
@@ -453,9 +531,31 @@ async fn launch(entry: Entry, app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// Execute an approved system command through the platform shell.
+fn run_system_command(command: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", command])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Simulates Ctrl+V after a clipboard/snippet action so the copied value is
 /// pasted directly into the previously-focused app. Runs off-thread with a
-/// short delay so the launcher window hides cleanly first.
+/// short delay so the launcher window hides cleanly first. Windows-only
+/// (uses SendInput).
+#[cfg(target_os = "windows")]
 fn simulate_paste() {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -478,6 +578,11 @@ fn simulate_paste() {
     });
 }
 
+/// On non-Windows platforms the copied value still lands on the clipboard but
+/// no paste keystroke is synthesized.
+#[cfg(not(target_os = "windows"))]
+fn simulate_paste() {}
+
 #[tauri::command]
 async fn hide_window(window: Window) {
     window.hide().ok();
@@ -490,7 +595,11 @@ async fn list_directory(path: String) -> Result<Vec<Entry>, String> {
 
     let expanded = if path.starts_with("~/") || path.starts_with("~\\") {
         if let Some(home) = dirs::home_dir() {
-            path.replacen(&path[0..2], &format!("{}\\", home.to_string_lossy()), 1)
+            path.replacen(
+                &path[0..2],
+                &format!("{}{}", home.to_string_lossy(), std::path::MAIN_SEPARATOR),
+                1,
+            )
         } else { path.clone() }
     } else { path.clone() };
 
@@ -643,10 +752,12 @@ async fn get_executable_list(state: State<'_, AppState>) -> Result<Vec<Entry>, S
     Ok(apps)
 }
 
+/// Factory reset: wipe the app's data directory (index cache, clipboard DB,
+/// settings) and restart fresh. Only reachable via the "refresh jor" keyword.
 #[tauri::command]
 async fn refresh_jor_data(app: tauri::AppHandle) -> Result<(), String> {
     let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    if app_dir.exists() && app_dir.to_string_lossy().contains("JOR") {
+    if app_dir.exists() {
         let _ = std::fs::remove_dir_all(&app_dir);
     }
     std::process::exit(0);
